@@ -44,11 +44,43 @@ python3 app.py
 
 Then open http://127.0.0.1:5000 and log in with your QRZ credentials.
 
+## Deploying to Render
+
+A `render.yaml` blueprint is included, so Render can pick up the whole
+config automatically:
+
+1. In the [Render dashboard](https://dashboard.render.com), **New +** ->
+   **Blueprint**, and point it at this repo.
+2. Render reads `render.yaml`, provisions a free web service running
+   `gunicorn app:app`, and auto-generates a stable `SECRET_KEY` env var
+   (important: without a fixed `SECRET_KEY`, each gunicorn worker process
+   would get its own random key and session cookies would break
+   intermittently depending on which worker handles a request).
+3. Deploy. Render gives you a `*.onrender.com` URL; a custom domain
+   (e.g. a `qsl` subdomain of kn0ble.com) can be attached afterward from
+   the service's Settings tab.
+
+**Storage note:** the free plan's disk is ephemeral -- a redeploy or a
+spin-down after inactivity wipes `instance/qsl_tracker.db`. Given results
+already auto-purge after 24h and there are no accounts, that's a fairly
+soft loss (an active visitor mid-session on a restart would just need to
+re-search), but if that ever matters, add a persistent disk to
+`render.yaml` (Starter plan or above; the free plan doesn't support
+disks):
+
+```yaml
+    disk:
+      name: qsl-data
+      mountPath: /opt/render/project/src/instance
+      sizeGB: 1
+```
+
 ## Project status
 
 Early / brainstorming-to-working-prototype stage. Next up:
 
-- [ ] Deploy a public instance
+- [x] Deploy a public instance -- `render.yaml` added; run through Render
+      dashboard to go live (see above)
 - [ ] Rate-limit QRZ lookups more carefully (QRZ throttles heavy use)
 - [ ] Consider a server-side session store instead of the signed cookie,
       since it currently holds the QRZ session key
