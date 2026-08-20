@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Dashboard -- QSL Tracker{% endblock %}
+{% block content %}
+  <section class="card">
+    <div class="dashboard-top">
+      <p>Logged in to QRZ as <strong>{{ qrz_username }}</strong>.</p>
+      <form method="post" action="{{ url_for('logout') }}">
+        <button type="submit" class="link-button">Log out</button>
+      </form>
+    </div>
+
+    <div class="lookup-forms">
+      <form method="post" action="{{ url_for('search') }}" class="inline-form">
+        <label for="callsign">Look up a callsign</label>
+        <input type="text" id="callsign" name="callsign" placeholder="e.g. KN0BLE" required>
+        <button type="submit">Look up</button>
+      </form>
+
+      <form method="post" action="{{ url_for('upload') }}" enctype="multipart/form-data" class="inline-form">
+        <label for="adif_file">Or upload an ADIF log (.adi)</label>
+        <input type="file" id="adif_file" name="adif_file" accept=".adi,.adif">
+        <button type="submit">Upload &amp; look up</button>
+      </form>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="results-top">
+      <div class="filter-toggle">
+        <a class="{{ 'active' if not direct_only else '' }}" href="{{ url_for('dashboard') }}">All contacts</a>
+        <a class="{{ 'active' if direct_only else '' }}" href="{{ url_for('dashboard', filter='direct') }}">Direct QSL only</a>
+      </div>
+      <form method="post" action="{{ url_for('clear') }}" onsubmit="return confirm('Clear all results for this session?');">
+        <button type="submit" class="link-button danger">Clear results</button>
+      </form>
+    </div>
+
+    {% if contacts %}
+      <table class="contacts">
+        <thead>
+          <tr>
+            <th>Callsign</th>
+            <th>Name</th>
+            <th>Address</th>
+            <th>Direct?</th>
+            <th>mQSL</th>
+            <th>eQSL</th>
+            <th>LoTW</th>
+            <th>QSL via</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in contacts %}
+            <tr class="{{ 'direct' if c['accepts_direct'] else '' }}">
+              <td>{{ c['callsign'] }}</td>
+              <td>{{ c['name'] }}</td>
+              <td class="address-cell">
+                {% if c['accepts_direct'] %}
+                  {{ c['address'] }}{% if c['address'] and c['city'] %}, {% endif %}{{ c['city'] }}
+                  {{ c['state'] }} {{ c['zip_code'] }}<br>{{ c['country'] }}
+                {% else %}
+                  <span class="muted">not stored</span>
+                {% endif %}
+              </td>
+              <td>{{ 'Yes' if c['accepts_direct'] else 'No' }}</td>
+              <td>{{ 'Y' if c['mqsl'] else '-' }}</td>
+              <td>{{ 'Y' if c['eqsl'] else '-' }}</td>
+              <td>{{ 'Y' if c['lotw'] else '-' }}</td>
+              <td>{{ c['qsl_via'] or '-' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No results yet. Look up a callsign or upload a log above.</p>
+    {% endif %}
+  </section>
+{% endblock %}
