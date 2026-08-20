@@ -9,10 +9,13 @@ Docs: https://www.qrz.com/XML/current_spec.html
 """
 from __future__ import annotations
 
+import logging
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 QRZ_XML_URL = "https://xmldata.qrz.com/xml/current/"
 NS = {"qrz": "http://xmldata.qrz.com"}
@@ -117,6 +120,14 @@ def lookup_callsign(session_key: str, callsign: str) -> QrzRecord:
     # or a QSL manager on file (cards should route through them, not
     # straight to the operator).
     accepts_direct = has_address and mqsl_raw != "0" and not qslmgr
+
+    # TEMPORARY debug logging (2026-08-20) while tracking down why some
+    # operators who should qualify as "direct" aren't. Shows up in
+    # Render's Logs tab. Remove once the filter is confirmed working.
+    logger.warning(
+        "QSL_DEBUG callsign=%s mqsl_raw=%r qslmgr=%r has_address=%s accepts_direct=%s",
+        callsign, mqsl_raw, qslmgr, has_address, accepts_direct,
+    )
 
     # We only keep a mailing address on file for operators who actually
     # want a direct card -- everyone else's address is simply discarded
