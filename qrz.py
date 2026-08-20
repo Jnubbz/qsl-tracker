@@ -98,17 +98,25 @@ def lookup_callsign(session_key: str, callsign: str) -> QrzRecord:
     if callsign_el is None:
         raise QrzError(f"No QRZ record found for {callsign}.")
 
-    mqsl = _text(callsign_el, "mqsl") == "1"
+    mqsl_raw = _text(callsign_el, "mqsl")
+    mqsl = mqsl_raw == "1"
     eqsl = _text(callsign_el, "eqsl") == "1"
     lotw = _text(callsign_el, "lotw") == "1"
     qslmgr = _text(callsign_el, "qslmgr")
+    has_address = bool(_text(callsign_el, "addr1"))
 
-    # QRZ's XML API doesn't expose a single "accepts Direct" boolean.
-    # `mqsl` means "will return a paper card" and an empty `qslmgr`
-    # means cards go straight to the operator rather than a manager --
-    # together that's the closest signal to "wants direct QSL cards".
-    # Adjust this rule if you find a better proxy in practice.
-    accepts_direct = mqsl and not qslmgr
+    # QRZ's XML API doesn't expose a single "accepts Direct" boolean, and
+    # `mqsl` per QRZ's own spec is "will return paper QSL (0/1 or blank
+    # if unknown)" -- most operators simply never set it, so it's blank
+    # far more often than it's an explicit "1". Requiring mqsl == "1"
+    # threw away addresses for anyone who hadn't ticked that box, even
+    # with a perfectly good mailing address on file.
+    #
+    # Instead: show the address whenever one exists and there's no
+    # explicit signal against it -- an explicit opt-out (mqsl == "0")
+    # or a QSL manager on file (cards should route through them, not
+    # straight to the operator).
+    accepts_direct = has_address and mqsl_raw != "0" and not qslmgr
 
     # We only keep a mailing address on file for operators who actually
     # want a direct card -- everyone else's address is simply discarded
