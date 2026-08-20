@@ -18,10 +18,15 @@ Part of the [KN0BLE.com](https://kn0ble.com) site, callsign KN0BLE.
 - Look up a single callsign, or upload an `.adi` / `.adif` log file to
   look up every callsign in it (capped at 200 per upload).
 - A mailing address is only kept for operators who look like they want a
-  direct card: an address is on file, there's no QSL manager listed, and
-  QRZ's `mqsl` field isn't explicitly set to "no" (most operators never
-  set it either way, so a blank `mqsl` doesn't disqualify them -- see the
-  comment in `qrz.py` if you want to tune that rule). Everyone else shows
+  direct card: an address is on file, QRZ's `mqsl` field isn't explicitly
+  set to "no" (most operators never set it either way, so a blank `mqsl`
+  doesn't disqualify them), and the `qslmgr` text doesn't name an actual
+  manager to route through. That last one is a free-text field operators
+  use two different ways -- naming a real manager ("via N0XYZ") or just
+  listing which methods *they* accept ("Direct, LOTW, QRZ.") -- so a
+  mention of "direct" in that text counts as a positive signal rather
+  than an exclusion, unless it's negated ("no direct"). See the comment
+  in `qrz.py` if you want to tune that rule further. Everyone else shows
   up in the list with `not stored` in the address column.
 - A toggle switches between "all looked-up contacts" and "direct QSL
   only".

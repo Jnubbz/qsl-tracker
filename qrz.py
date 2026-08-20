@@ -119,14 +119,27 @@ def lookup_callsign(session_key: str, callsign: str) -> QrzRecord:
     # explicit signal against it -- an explicit opt-out (mqsl == "0")
     # or a QSL manager on file (cards should route through them, not
     # straight to the operator).
-    accepts_direct = has_address and mqsl_raw != "0" and not qslmgr
+    # `qslmgr` is free text, and operators use it two different ways in
+    # practice: naming an actual QSL manager to route cards through
+    # ("via N0XYZ"), or describing which methods *they themselves*
+    # accept ("Direct, LOTW, QRZ."). Only the first case should exclude
+    # someone -- if the text itself says "direct" (and doesn't negate
+    # it, e.g. "no direct"), that's actually a positive signal, not a
+    # manager to route around.
+    qslmgr_lower = qslmgr.lower()
+    negates_direct = "no direct" in qslmgr_lower or "not direct" in qslmgr_lower
+    mentions_direct = "direct" in qslmgr_lower and not negates_direct
+    has_manager = bool(qslmgr) and not mentions_direct
+
+    accepts_direct = has_address and mqsl_raw != "0" and not has_manager
 
     # TEMPORARY debug logging (2026-08-20) while tracking down why some
     # operators who should qualify as "direct" aren't. Shows up in
     # Render's Logs tab. Remove once the filter is confirmed working.
     logger.warning(
-        "QSL_DEBUG callsign=%s mqsl_raw=%r qslmgr=%r has_address=%s accepts_direct=%s",
-        callsign, mqsl_raw, qslmgr, has_address, accepts_direct,
+        "QSL_DEBUG callsign=%s mqsl_raw=%r qslmgr=%r has_address=%s "
+        "has_manager=%s accepts_direct=%s",
+        callsign, mqsl_raw, qslmgr, has_address, has_manager, accepts_direct,
     )
 
     # We only keep a mailing address on file for operators who actually
