@@ -22,7 +22,7 @@ from flask import Flask, Response, flash, redirect, render_template, request, se
 
 import db
 from adif import distinct_callsigns, parse_adif
-from qrz import QrzError, get_session_key, lookup_callsign
+from qrz import QrzError, format_mailing_label, get_session_key, lookup_callsign
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
@@ -138,13 +138,18 @@ def export_csv():
         flash("No direct-QSL contacts with an address to export yet.", "error")
         return redirect(url_for("dashboard"))
 
+    # One cell per contact holds a full, ready-to-paste mailing label
+    # (name, street, city/state/zip, country all on their own lines) --
+    # select the cell, paste, done. Callsign stays a separate column
+    # purely for reference/sorting; it's not part of the label itself.
     buffer = io.StringIO()
     writer = csv.writer(buffer)
-    writer.writerow(["Callsign", "Name", "Address", "City", "State", "Zip", "Country"])
+    writer.writerow(["Callsign", "Mailing Label"])
     for c in contacts:
-        writer.writerow(
-            [c["callsign"], c["name"], c["address"], c["city"], c["state"], c["zip_code"], c["country"]]
+        label = format_mailing_label(
+            c["name"], c["address"], c["city"], c["state"], c["zip_code"], c["country"]
         )
+        writer.writerow([c["callsign"], label])
 
     filename = f"qsl-direct-contacts-{date.today().isoformat()}.csv"
     return Response(

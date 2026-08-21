@@ -37,10 +37,13 @@ Part of the [KN0BLE.com](https://kn0ble.com) site, callsign KN0BLE.
   up in the list with `not stored` in the address column.
 - A toggle switches between "all looked-up contacts" and "direct QSL
   only".
-- "Export CSV" downloads a mail-merge-ready CSV (callsign, name, address,
-  city, state, zip, country) of every direct-QSL contact with an address
-  on file -- independent of whichever table filter is currently active,
-  since a mailing list only makes sense for contacts with an address.
+- "Export CSV" downloads every direct-QSL contact with an address on
+  file as two columns: callsign, and a single "Mailing Label" cell with
+  the name and full address (street, city/state/zip, country) on their
+  own lines inside that one cell -- select it, paste, and it's a
+  complete label, no reassembling separate columns. Independent of
+  whichever table filter is currently active, since a mailing list only
+  makes sense for contacts with an address.
 - Results are stored in SQLite, scoped to your session, and purged
   automatically after 24 hours.
 
@@ -112,7 +115,8 @@ Early / brainstorming-to-working-prototype stage. Next up:
       the cookie only ever carries that id, never the key itself
 - [x] Export results (CSV) for printing mailing labels -- "Export CSV"
       link on the dashboard, always the direct-QSL contacts with an
-      address on file regardless of which table filter is active
+      address on file regardless of which table filter is active; each
+      row's address cell is one paste-ready label block (see above)
 
 ## License
 

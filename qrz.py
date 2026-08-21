@@ -22,6 +22,27 @@ class QrzError(Exception):
     """Raised when QRZ rejects a login or a lookup."""
 
 
+def format_mailing_label(
+    name: str, address: str, city: str, state: str, zip_code: str, country: str
+) -> str:
+    """Format a name + address into a ready-to-print mailing label block.
+
+    One multi-line string: name, street address, "city, state zip", and
+    country, each on their own line -- blank pieces just drop out rather
+    than leaving an empty line. Shared by QrzRecord.full_address() and
+    the dashboard's CSV export, so both produce identical label text.
+    """
+    lines = [name, address]
+    city_line = ", ".join(p for p in (city, state) if p)
+    if zip_code:
+        city_line = f"{city_line} {zip_code}".strip()
+    if city_line:
+        lines.append(city_line)
+    if country:
+        lines.append(country)
+    return "\n".join(line for line in lines if line)
+
+
 @dataclass
 class QrzRecord:
     callsign: str
@@ -39,15 +60,9 @@ class QrzRecord:
     accepts_direct: bool = False  # our derived "wants a direct card" flag
 
     def full_address(self) -> str:
-        lines = [self.name, self.address]
-        city_line = ", ".join(p for p in (self.city, self.state) if p)
-        if self.zip_code:
-            city_line = f"{city_line} {self.zip_code}".strip()
-        if city_line:
-            lines.append(city_line)
-        if self.country:
-            lines.append(self.country)
-        return "\n".join(line for line in lines if line)
+        return format_mailing_label(
+            self.name, self.address, self.city, self.state, self.zip_code, self.country
+        )
 
 
 def _text(el, tag: str) -> str:
