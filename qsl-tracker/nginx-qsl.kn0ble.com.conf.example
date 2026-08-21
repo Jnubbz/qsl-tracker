@@ -1,0 +1,43 @@
+# Example nginx reverse-proxy config for qsl.kn0ble.com -> the
+# qsl-tracker Docker container. Adapt to however your nginx is actually
+# set up -- this assumes a "plain" nginx (or SWAG-style) server block
+# with its own cert; see README.md's "Self-hosting on Unraid" section
+# for the Nginx Proxy Manager (GUI) equivalent if that's what you run
+# instead.
+#
+# proxy_pass below assumes nginx can reach the container over the host
+# network at the port published in docker-compose.yml (8010 by
+# default). If nginx runs in its own Docker container on the same
+# Docker network as qsl-tracker instead, use the service name and
+# container port there (http://qsl-tracker:8000) rather than
+# 127.0.0.1:8010.
+
+server {
+    listen 80;
+    server_name qsl.kn0ble.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name qsl.kn0ble.com;
+
+    # Point these at wherever your existing setup keeps certs (e.g.
+    # Let's Encrypt via SWAG, certbot, etc.) -- same pattern you're
+    # already using for other self-hosted subdomains.
+    ssl_certificate     /path/to/qsl.kn0ble.com/fullchain.pem;
+    ssl_certificate_key /path/to/qsl.kn0ble.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8010;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Card photos get relayed through the app on upload (see
+        # s3.py) -- a generous body size avoids nginx rejecting a
+        # multi-photo upload before it ever reaches gunicorn.
+        client_max_body_size 25m;
+    }
+}

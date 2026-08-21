@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: qsl-tracker
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: SECRET_KEY
+        generateValue: true
+      # Resend API credentials for the "Request a QSL Card" email
+      # notification (see mailer.py / README) -- sync: false means
+      # Render will prompt for these in the dashboard instead of
+      # storing real values here. Switched from Gmail SMTP to Resend's
+      # HTTP API on 2026-08-21 because Render's free plan blocks
+      # outbound SMTP (both port 465 and 587 timed out).
+      - key: RESEND_API_KEY
+        sync: false
+      - key: NOTIFY_EMAIL
+        sync: false
+      # QSL Photo Map (s3.py) -- S3_BUCKET/AWS_REGION aren't secret, so
+      # they're set directly here. AWS credentials and the admin
+      # password are secrets -- sync: false prompts for them in the
+      # Render dashboard instead of storing them in the repo. The IAM
+      # user behind those keys only needs s3:PutObject and s3:GetObject
+      # scoped to this bucket's photocards/* prefix -- see README.
+      - key: S3_BUCKET
+        value: kn0ble-qsl-381999184691-us-east-2-an
+      - key: AWS_REGION
+        value: us-east-2
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
