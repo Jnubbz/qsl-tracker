@@ -20,13 +20,41 @@ credentials ever go stale later.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import smtplib
+import socket
 import sys
 from email.message import EmailMessage
 
 logger = logging.getLogger(__name__)
+
+
+@contextlib.contextmanager
+def _force_ipv4_dns():
+    """Temporarily make socket.getaddrinfo() return only IPv4 (AF_INET)
+    results.
+
+    Render's containers (at least as of 2026-08) advertise an IPv6
+    address but don't actually have a working outbound IPv6 route --
+    connecting to a host that has an AAAA record (like smtp.gmail.com)
+    fails immediately with `OSError: [Errno 101] Network is unreachable`
+    rather than timing out, because the kernel already knows it has no
+    route for that address family. smtplib/socket.create_connection()
+    tries whichever addresses getaddrinfo() returns, in order, so this
+    forces it to only ever see IPv4 addresses -- diagnosed by an actual
+    traceback showing exactly this error on 2026-08-21."""
+    real_getaddrinfo = socket.getaddrinfo
+
+    def ipv4_only(host, port, family=0, type=0, proto=0, flags=0):
+        return real_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+
+    socket.getaddrinfo = ipv4_only
+    try:
+        yield
+    finally:
+        socket.getaddrinfo = real_getaddrinfo
 
 
 def _log(message: str) -> None:
@@ -94,7 +122,7 @@ def send_qsl_request_email(callsign: str, note: str, contact_email: str) -> bool
     print(f"QSL request email: attempting SMTP send for callsign {callsign or '(none)'}...",
           file=sys.stderr, flush=True)
     try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as smtp:
+        with _force_ipv4_dns(), smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as smtp:
             smtp.login(gmail_address, gmail_app_password)
             smtp.send_message(msg)
         _log(f"QSL request email sent for callsign {callsign or '(none)'}")
