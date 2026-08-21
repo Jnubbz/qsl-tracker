@@ -281,7 +281,7 @@ def clear():
 def request_qsl():
     """Public, unauthenticated form (embedded on kn0ble.com) for a
     visitor to ask for a QSL card back -- no QRZ login required. On
-    submit it's saved to the database and, if Gmail is configured
+    submit it's saved to the database and, if Resend is configured
     (see mailer.py), emailed straight to Josh."""
     if request.method == "POST":
         # Honeypot: a hidden field real visitors never see or fill in.
