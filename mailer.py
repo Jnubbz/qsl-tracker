@@ -25,6 +25,7 @@ import logging
 import os
 import smtplib
 import socket
+import ssl
 import sys
 from email.message import EmailMessage
 
@@ -122,7 +123,20 @@ def send_qsl_request_email(callsign: str, note: str, contact_email: str) -> bool
     print(f"QSL request email: attempting SMTP send for callsign {callsign or '(none)'}...",
           file=sys.stderr, flush=True)
     try:
-        with _force_ipv4_dns(), smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as smtp:
+        # Port 587 + STARTTLS instead of port 465 + implicit SSL --
+        # switched 2026-08-21 after 465 reliably timed out from Render
+        # (port 465 outbound appears to be silently firewalled on the
+        # free plan; the connection just hangs until our own 10s socket
+        # timeout fires, rather than being refused). 587 is the other
+        # standard SMTP submission port and is sometimes left open even
+        # when 465 isn't -- if this ALSO times out, the port is blocked
+        # too and the real fix is switching to an HTTP-based email API
+        # (e.g. Resend) instead of raw SMTP, since outbound HTTPS is
+        # never blocked (the app already depends on it for QRZ calls).
+        with _force_ipv4_dns(), smtplib.SMTP("smtp.gmail.com", 587, timeout=10) as smtp:
+            smtp.ehlo()
+            smtp.starttls(context=ssl.create_default_context())
+            smtp.ehlo()
             smtp.login(gmail_address, gmail_app_password)
             smtp.send_message(msg)
         _log(f"QSL request email sent for callsign {callsign or '(none)'}")
