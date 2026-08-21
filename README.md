@@ -116,30 +116,45 @@ or above; the free plan doesn't support disks):
 
 ## Email notifications for QSL card requests
 
-The `/request-qsl` form emails a notification via Gmail SMTP when
-someone requests a card. It needs three env vars set in the Render
-dashboard (Settings -> Environment) -- `render.yaml` declares them with
-`sync: false` so Render prompts for values instead of storing them in
-the repo:
+The `/request-qsl` form emails a notification via the
+[Resend](https://resend.com) HTTP API when someone requests a card.
+**Not Gmail SMTP** -- that was the original approach and it doesn't
+work on Render's free plan (see "Why not Gmail SMTP" below). It needs
+two env vars set in the Render dashboard (Settings -> Environment) --
+`render.yaml` declares them with `sync: false` so Render prompts for
+values instead of storing them in the repo:
 
-- `GMAIL_ADDRESS` -- the Gmail account that sends the notification.
-- `GMAIL_APP_PASSWORD` -- a Google **app password** for that account
-  (not your regular Gmail password). To generate one:
-  1. Turn on 2-Step Verification on the Google account, if it isn't
-     already (Google Account -> Security).
-  2. Go to [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords),
-     sign in again if prompted.
-  3. Create a new app password (name it something like "QSL Tracker"),
-     copy the 16-character password it generates.
-  4. Paste that into `GMAIL_APP_PASSWORD` in Render -- not the regular
-     account password, which won't work here and shouldn't be used for
-     this anyway.
-- `NOTIFY_EMAIL` -- where the notification should land. Usually the
-  same address as `GMAIL_ADDRESS`, but can be different.
+- `RESEND_API_KEY` -- an API key from a free [resend.com](https://resend.com)
+  account. Sign up, skip domain verification (not needed for this),
+  and grab an API key from the dashboard.
+- `NOTIFY_EMAIL` -- where the notification should land, e.g. Josh's own
+  Gmail address. **Must be the same email address the Resend account
+  was created with**, unless a custom sending domain has been
+  verified -- Resend's free/unverified tier only allows sending to
+  your own address, as an anti-abuse measure. That's exactly what this
+  feature needs (notifications to yourself), so it's not actually a
+  limitation here.
 
 If these aren't set, the form still works and requests are still saved
-to the database -- they just won't trigger an email until the Gmail
+to the database -- they just won't trigger an email until the Resend
 setup is done.
+
+**Why not Gmail SMTP:** the original version of this feature used
+Gmail SMTP directly. Render's free plan silently blocks outbound SMTP
+entirely -- both port 465 (implicit TLS) and port 587 (STARTTLS)
+reliably timed out from a live deployment (confirmed 2026-08-21), which
+is a common anti-spam policy on free-tier hosts. Plain HTTPS isn't
+blocked (the app already depends on it for the QRZ API), so switching
+to an HTTP-based email API sidesteps the problem entirely rather than
+fighting it. Along the way an unrelated IPv6 issue was also found and
+worked around (`_force_ipv4_dns()` in `mailer.py`'s git history) --
+Render's containers advertise an IPv6 address but don't actually route
+it outbound, which caused a separate instant `Network is unreachable`
+error before the SMTP-port-blocking issue was even reached. That fix is
+no longer needed now that SMTP isn't used at all, but the lesson (check
+IPv4-only if a Render outbound connection fails instantly rather than
+timing out) is worth remembering for anything else this app might ever
+connect to.
 
 ## Project status
 

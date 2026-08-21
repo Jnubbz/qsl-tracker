@@ -10,12 +10,13 @@ services:
         value: 3.11.9
       - key: SECRET_KEY
         generateValue: true
-      # Gmail credentials for the "Request a QSL Card" email notification
-      # (see mailer.py / README) -- sync: false means Render will prompt
-      # for these in the dashboard instead of storing real values here.
-      - key: GMAIL_ADDRESS
-        sync: false
-      - key: GMAIL_APP_PASSWORD
+      # Resend API credentials for the "Request a QSL Card" email
+      # notification (see mailer.py / README) -- sync: false means
+      # Render will prompt for these in the dashboard instead of
+      # storing real values here. Switched from Gmail SMTP to Resend's
+      # HTTP API on 2026-08-21 because Render's free plan blocks
+      # outbound SMTP (both port 465 and 587 timed out).
+      - key: RESEND_API_KEY
         sync: false
       - key: NOTIFY_EMAIL
         sync: false
