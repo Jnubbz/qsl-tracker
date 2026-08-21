@@ -210,11 +210,14 @@ Uploading is admin-only (just Josh) -- there's no public upload:
   rest of the app) the first time a given callsign is used.
 
 Photos are stored in a private S3 bucket and relayed straight through the
-Flask app on upload (a normal multipart form post, not a direct-to-S3
-presigned upload) -- simple, and avoids needing any S3 CORS
-configuration. The public map page never gets a permanent link to a
-photo; it gets a short-lived presigned GET URL, regenerated every time
-the page loads.
+Flask app both ways: on upload (a normal multipart form post, not a
+direct-to-S3 presigned upload) and on view (`/photomap/image/<key>`
+streams the object's bytes through Flask rather than handing the
+browser a presigned S3 URL). Both choices avoid needing any S3 CORS
+configuration. The presigned-URL approach was tried first for viewing
+and dropped after it ran into a persistent, never-fully-explained
+`SignatureDoesNotMatch` in production -- see `qsl-tracker-status.md` in
+the project for the full debugging trail if this ever needs revisiting.
 
 **All of this data lives in S3, not in Render's SQLite disk** --
 `photomap_store.py` keeps every callsign location, photo card, and
@@ -241,15 +244,30 @@ the dashboard instead of storing them in the repo:
   ```json
   {
     "Version": "2012-10-17",
-    "Statement": [{
-      "Effect": "Allow",
-      "Action": ["s3:PutObject", "s3:GetObject"],
-      "Resource": "arn:aws:s3:::kn0ble-qsl-.../photocards/*"
-    }]
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Action": ["s3:PutObject", "s3:GetObject"],
+        "Resource": "arn:aws:s3:::kn0ble-qsl-.../photocards/*"
+      },
+      {
+        "Effect": "Allow",
+        "Action": "s3:ListBucket",
+        "Resource": "arn:aws:s3:::kn0ble-qsl-...",
+        "Condition": {
+          "StringLike": { "s3:prefix": "photocards/*" }
+        }
+      }
+    ]
   }
   ```
-  (swap in the real bucket name; no `s3:ListBucket` or account-wide
-  access needed).
+  (swap in the real bucket name; no account-wide access needed). The
+  `ListBucket` statement is scoped to just the `photocards/*` prefix
+  via the `StringLike` condition -- it's needed because S3 returns
+  `AccessDenied` instead of a clean 404 on `GetObject` for a
+  not-yet-existing key (like `photocards/_index.json` on first run)
+  when the caller lacks `ListBucket`, which otherwise looks exactly
+  like a permissions problem instead of "nothing's been uploaded yet."
 - `ADMIN_PASSWORD` -- whatever password gates `/admin/login`. Pick
   something you don't use anywhere else -- it's checked with a
   constant-time compare but is otherwise a plain shared password, not
