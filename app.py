@@ -22,6 +22,7 @@ from flask import Flask, Response, flash, redirect, render_template, request, se
 
 import db
 from adif import distinct_callsigns, parse_adif
+from mailer import send_qsl_request_email
 from qrz import QrzError, format_mailing_label, get_session_key, lookup_callsign
 
 app = Flask(__name__)
@@ -52,6 +53,12 @@ LOOKUP_DELAY_SECONDS = 0.2
 # or the session key going bad mid-batch), stop after a few in a row
 # instead of grinding through the rest of the list for no reason.
 MAX_CONSECUTIVE_FAILURES = 5
+
+# The "Request a QSL Card" form (embedded on kn0ble.com, posts here) is
+# public and unauthenticated, so it gets its own light rate limit keyed
+# off the same anonymous session id everything else uses.
+QSL_REQUEST_RATE_LIMIT = 3
+QSL_REQUEST_RATE_WINDOW_SECONDS = 600
 
 
 @app.before_request
@@ -258,6 +265,45 @@ def clear():
     db.clear_session(session["session_id"])
     flash("Cleared your results.", "success")
     return redirect(url_for("dashboard"))
+
+
+@app.route("/request-qsl", methods=["GET", "POST"])
+def request_qsl():
+    """Public, unauthenticated form (embedded on kn0ble.com) for a
+    visitor to ask for a QSL card back -- no QRZ login required. On
+    submit it's saved to the database and, if Gmail is configured
+    (see mailer.py), emailed straight to Josh."""
+    if request.method == "POST":
+        # Honeypot: a hidden field real visitors never see or fill in.
+        # A bot that fills every field trips this -- pretend success
+        # without sending an email or storing anything, so it doesn't
+        # even learn the trick failed.
+        if request.form.get("website"):
+            return redirect(url_for("request_qsl_thanks"))
+
+        callsign = request.form.get("callsign", "").strip().upper()[:20]
+        note = request.form.get("note", "").strip()[:500]
+        contact_email = request.form.get("email", "").strip()[:200]
+
+        if not callsign:
+            flash("Enter a callsign so I know who to send a card to.", "error")
+            return redirect(url_for("request_qsl"))
+
+        session_id = session["session_id"]
+        if db.count_recent_qsl_requests(session_id, QSL_REQUEST_RATE_WINDOW_SECONDS) >= QSL_REQUEST_RATE_LIMIT:
+            flash("Too many requests from this browser recently -- try again later.", "error")
+            return redirect(url_for("request_qsl"))
+
+        db.save_qsl_request(session_id, callsign, note, contact_email)
+        send_qsl_request_email(callsign, note, contact_email)
+        return redirect(url_for("request_qsl_thanks"))
+
+    return render_template("request_qsl.html")
+
+
+@app.route("/request-qsl/thanks")
+def request_qsl_thanks():
+    return render_template("request_qsl_thanks.html")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Request a QSL Card -- QSL Tracker{% endblock %}
+{% block content %}
+  <section class="card">
+    <h1>Request a QSL card</h1>
+    <p>
+      Worked KN0BLE and want a card back? Send your callsign below and
+      I'll look you up and get one in the mail.
+    </p>
+    <form method="post" action="{{ url_for('request_qsl') }}">
+      <label for="callsign">Your callsign</label>
+      <input type="text" id="callsign" name="callsign" maxlength="20" required autocomplete="off">
+
+      <label for="note">Note (optional)</label>
+      <input type="text" id="note" name="note" maxlength="200" placeholder="e.g. worked you on 20m CW, Aug 2026">
+
+      <label for="email">Your email (optional)</label>
+      <input type="email" id="email" name="email" maxlength="200" autocomplete="email">
+
+      <div class="hp-field" aria-hidden="true">
+        <label for="website">Leave this field empty</label>
+        <input type="text" id="website" name="website" tabindex="-1" autocomplete="off">
+      </div>
+
+      <button type="submit">Request a QSL Card</button>
+    </form>
+  </section>
+{% endblock %}

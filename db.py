@@ -48,6 +48,16 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
     qrz_username TEXT,
     created_at REAL NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS qsl_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    callsign TEXT NOT NULL,
+    note TEXT,
+    contact_email TEXT,
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_qsl_requests_session ON qsl_requests(session_id);
 """
 
 
@@ -69,6 +79,12 @@ def init_db() -> None:
 
 
 def purge_expired() -> None:
+    # qsl_requests is deliberately NOT purged here -- unlike contacts and
+    # auth_sessions (which are ephemeral per-visitor scratch data), it's
+    # a small log of incoming card requests that's useful to keep around
+    # as a backup to the email notification. (It's still wiped whenever
+    # Render redeploys/restarts, since the free plan's disk isn't
+    # persistent -- the email is the durable record.)
     cutoff = time.time() - SESSION_TTL_HOURS * 3600
     with get_conn() as conn:
         conn.execute("DELETE FROM contacts WHERE looked_up_at < ?", (cutoff,))
@@ -162,3 +178,26 @@ def get_contacts(session_id: str, direct_only: bool = False) -> list[sqlite3.Row
 def clear_session(session_id: str) -> None:
     with get_conn() as conn:
         conn.execute("DELETE FROM contacts WHERE session_id = ?", (session_id,))
+
+
+def save_qsl_request(session_id: str, callsign: str, note: str, contact_email: str) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO qsl_requests (session_id, callsign, note, contact_email, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (session_id, callsign, note, contact_email, time.time()),
+        )
+
+
+def count_recent_qsl_requests(session_id: str, window_seconds: int) -> int:
+    """How many QSL card requests this anonymous session has made in the
+    last `window_seconds` -- used to rate-limit the public request form."""
+    cutoff = time.time() - window_seconds
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM qsl_requests WHERE session_id = ? AND created_at > ?",
+            (session_id, cutoff),
+        ).fetchone()
+        return row["n"] if row else 0

@@ -180,3 +180,13 @@ table.contacts tr.direct { background: rgba(31, 111, 79, 0.06); }
 }
 
 .site-footer a { color: inherit; }
+
+/* Honeypot field for the public "Request a QSL Card" form -- hidden
+   from real visitors (and screen readers), left for bots to fill in. */
+.hp-field {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}

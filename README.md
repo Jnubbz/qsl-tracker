@@ -49,6 +49,16 @@ Part of the [KN0BLE.com](https://kn0ble.com) site, callsign KN0BLE.
   turning on "Wrap Text" (or widening the row) reveals the full address.
 - Results are stored in SQLite, scoped to your session, and purged
   automatically after 24 hours.
+- `/request-qsl` is a separate, public, unauthenticated form (no QRZ
+  login needed) for the reverse case: someone worked KN0BLE and wants a
+  card mailed back to *them*. It's embedded directly on kn0ble.com
+  (index and awards pages) via a plain HTML `<form>` posting here, and
+  also reachable directly. On submit it's saved to a `qsl_requests`
+  table and, if Gmail is configured (see below), emailed straight to
+  Josh with the callsign, optional note, and optional contact email so
+  he can look the callsign up here the normal way and mail a card. A
+  hidden honeypot field and a light per-session rate limit (3 requests /
+  10 minutes) guard against bots and spam.
 
 ## Setup
 
@@ -104,6 +114,33 @@ or above; the free plan doesn't support disks):
       sizeGB: 1
 ```
 
+## Email notifications for QSL card requests
+
+The `/request-qsl` form emails a notification via Gmail SMTP when
+someone requests a card. It needs three env vars set in the Render
+dashboard (Settings -> Environment) -- `render.yaml` declares them with
+`sync: false` so Render prompts for values instead of storing them in
+the repo:
+
+- `GMAIL_ADDRESS` -- the Gmail account that sends the notification.
+- `GMAIL_APP_PASSWORD` -- a Google **app password** for that account
+  (not your regular Gmail password). To generate one:
+  1. Turn on 2-Step Verification on the Google account, if it isn't
+     already (Google Account -> Security).
+  2. Go to [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords),
+     sign in again if prompted.
+  3. Create a new app password (name it something like "QSL Tracker"),
+     copy the 16-character password it generates.
+  4. Paste that into `GMAIL_APP_PASSWORD` in Render -- not the regular
+     account password, which won't work here and shouldn't be used for
+     this anyway.
+- `NOTIFY_EMAIL` -- where the notification should land. Usually the
+  same address as `GMAIL_ADDRESS`, but can be different.
+
+If these aren't set, the form still works and requests are still saved
+to the database -- they just won't trigger an email until the Gmail
+setup is done.
+
 ## Project status
 
 Early / brainstorming-to-working-prototype stage. Next up:
@@ -120,6 +157,9 @@ Early / brainstorming-to-working-prototype stage. Next up:
       link on the dashboard, always the direct-QSL contacts with an
       address on file regardless of which table filter is active; each
       row's address cell is one paste-ready label block (see above)
+- [x] "Request a QSL Card" -- public form (embedded on kn0ble.com) for
+      visitors to request a card back, emailed to Josh via Gmail SMTP
+      (see "Email notifications" above)
 
 ## License
 
