@@ -19,6 +19,7 @@ to set (see render.yaml / README).
 """
 from __future__ import annotations
 
+import json
 import mimetypes
 import os
 import uuid
@@ -82,6 +83,38 @@ def presigned_url(key: str, expires_in: int = 3600) -> str:
             "get_object",
             Params={"Bucket": BUCKET, "Key": key},
             ExpiresIn=expires_in,
+        )
+    except ClientError as exc:
+        raise S3Error(str(exc)) from exc
+
+
+def get_json(key: str):
+    """Fetch and parse a JSON object from the bucket, or None if it
+    doesn't exist yet (a fresh bucket, or first run). Used by
+    photomap_store.py to keep the QSL Photo Map's data durable without
+    needing Render's (ephemeral, free-tier) disk at all."""
+    if not BUCKET:
+        raise S3Error("S3_BUCKET isn't configured.")
+    try:
+        obj = _get_client().get_object(Bucket=BUCKET, Key=key)
+        return json.loads(obj["Body"].read().decode("utf-8"))
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "")
+        if code in ("NoSuchKey", "404"):
+            return None
+        raise S3Error(str(exc)) from exc
+
+
+def put_json(key: str, data) -> None:
+    """Write a JSON-serializable value to the bucket as an object."""
+    if not BUCKET:
+        raise S3Error("S3_BUCKET isn't configured.")
+    try:
+        _get_client().put_object(
+            Bucket=BUCKET,
+            Key=key,
+            Body=json.dumps(data, indent=2).encode("utf-8"),
+            ContentType="application/json",
         )
     except ClientError as exc:
         raise S3Error(str(exc)) from exc

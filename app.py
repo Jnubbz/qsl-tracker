@@ -23,6 +23,7 @@ from functools import wraps
 from flask import Flask, Response, flash, redirect, render_template, request, session, url_for
 
 import db
+import photomap_store
 from adif import distinct_callsigns, parse_adif
 from mailer import send_qsl_request_email
 from qrz import QrzError, format_mailing_label, get_session_key, lookup_callsign, lookup_location
@@ -386,11 +387,11 @@ def admin_import_adif():
             return redirect(url_for("admin_import_adif"))
 
         qsos = parse_adif(text)
-        added = db.import_my_qsos(qsos)
+        added = photomap_store.import_my_qsos(qsos)
         flash(f"Imported {added} new QSO record(s) ({len(qsos)} found in the file).", "success")
         return redirect(url_for("admin_import_adif"))
 
-    return render_template("admin_import_adif.html", qso_count=db.count_my_qsos())
+    return render_template("admin_import_adif.html", qso_count=photomap_store.count_my_qsos())
 
 
 @app.route("/admin/photomap/api/qsos")
@@ -401,7 +402,7 @@ def admin_photomap_api_qsos():
     callsign = request.args.get("callsign", "").strip().upper()
     if not callsign:
         return {"qsos": []}
-    rows = db.find_my_qsos(callsign)
+    rows = photomap_store.find_my_qsos(callsign)
     return {"qsos": [dict(r) for r in rows]}
 
 
@@ -431,7 +432,7 @@ def admin_photomap_upload():
         # repeat upload for the same station doesn't re-hit QRZ. The
         # admin needs a QRZ session to populate it the first time --
         # the same login used everywhere else in the app (see /login).
-        location = db.get_callsign_location(callsign)
+        location = photomap_store.get_callsign_location(callsign)
         if location is None:
             key = qrz_key_or_none()
             if not key:
@@ -443,8 +444,8 @@ def admin_photomap_upload():
                 return redirect(url_for("admin_photomap_upload", callsign=callsign))
             try:
                 loc = lookup_location(key, callsign)
-                db.save_callsign_location(loc)
-                location = db.get_callsign_location(callsign)
+                photomap_store.save_callsign_location(loc)
+                location = photomap_store.get_callsign_location(callsign)
             except QrzError as exc:
                 flash(f"QRZ lookup failed: {exc}", "error")
                 return redirect(url_for("admin_photomap_upload", callsign=callsign))
@@ -452,13 +453,13 @@ def admin_photomap_upload():
                 flash("Couldn't reach QRZ right now. Try again in a moment.", "error")
                 return redirect(url_for("admin_photomap_upload", callsign=callsign))
 
-        card_id = db.add_photo_card(callsign, qso_date, band, mode, freq, rst_sent, rst_rcvd, note)
+        card_id = photomap_store.add_photo_card(callsign, qso_date, band, mode, freq, rst_sent, rst_rcvd, note)
 
         uploaded, failed = 0, 0
         for f in files:
             try:
                 key = upload_card_image(f, callsign)
-                db.add_photo_card_image(card_id, key)
+                photomap_store.add_photo_card_image(card_id, key)
                 uploaded += 1
             except S3Error:
                 failed += 1
@@ -474,7 +475,7 @@ def admin_photomap_upload():
     return render_template(
         "admin_photomap_upload.html",
         callsign_prefill=request.args.get("callsign", ""),
-        recent_cards=db.list_recent_photo_cards(10),
+        recent_cards=photomap_store.list_recent_photo_cards(10),
     )
 
 
@@ -485,7 +486,7 @@ def photomap():
 
 @app.route("/photomap/api/pins")
 def photomap_api_pins():
-    points = db.list_map_points()
+    points = photomap_store.list_map_points()
     return {
         "pins": [
             {
@@ -504,12 +505,12 @@ def photomap_api_pins():
 @app.route("/photomap/api/callsign/<callsign>")
 def photomap_api_callsign(callsign):
     callsign = callsign.strip().upper()
-    location = db.get_callsign_location(callsign)
-    cards = db.get_cards_for_callsign(callsign)
+    location = photomap_store.get_callsign_location(callsign)
+    cards = photomap_store.get_cards_for_callsign(callsign)
 
     result_cards = []
     for card in cards:
-        images = db.get_images_for_card(card["id"])
+        images = photomap_store.get_images_for_card(card["id"])
         urls = []
         for img in images:
             try:

@@ -103,9 +103,11 @@ redeploy/spin-down too, since the QRZ session key moved into that same
 database (see "server-side session store" below) -- that trade is worth
 it (nothing sensitive sits in the browser's cookie anymore) but it's a
 real behavior change from before, when the cookie alone kept someone
-logged in across a restart. If either of these ever matters more than
-the trade is worth, add a persistent disk to `render.yaml` (Starter plan
-or above; the free plan doesn't support disks):
+logged in across a restart. That's still an accepted tradeoff for
+`contacts`/`auth_sessions`/`qsl_requests`, which are meant to be
+short-lived. If it ever needs to stop being ephemeral too, add a
+persistent disk to `render.yaml` (Starter plan or above; the free plan
+doesn't support disks):
 
 ```yaml
     disk:
@@ -113,6 +115,33 @@ or above; the free plan doesn't support disks):
       mountPath: /opt/render/project/src/instance
       sizeGB: 1
 ```
+
+**The QSL Photo Map's data does *not* depend on this disk at all** --
+see "QSL Photo Map" below for why (it's stored in S3 as JSON instead),
+so cards uploaded through `/admin/photomap/upload` survive Render
+redeploys/spin-downs on the free plan just fine, no disk upgrade needed.
+
+**Self-hosting on Unraid was considered and built out** (see the git
+history around 2026-08-21 -- `Dockerfile`, `docker-compose.yml`,
+`.env.example`, an nginx config example) as a way to get a real
+persistent disk instead of working around Render's ephemeral one. That
+plan is currently on hold: Josh's Starlink failover doesn't play nicely
+with the reverse-proxy setup that'd be needed to expose a self-hosted
+container reliably. Render stays the deployment target for now. The
+Docker files are left in the repo in case that changes -- they're inert
+otherwise (nothing about the Render deployment depends on them).
+
+If this comes back up later, the previously-written steps (get the repo
+onto the box, copy `.env.example` to `.env`, check the volume path in
+`docker-compose.yml`, `docker compose up -d --build`, reverse proxy
+`qsl.kn0ble.com` to the published port using
+`nginx-qsl.kn0ble.com.conf.example` as a starting point, then repoint
+DNS) are all still valid -- nothing about them changed, they're just
+not the active plan right now. One thing that *did* change since they
+were written: there's no need to migrate any QSL Photo Map data off of
+Render before a future cutover -- it already lives in S3 (see below),
+not in Render's SQLite disk, so it'd already be there regardless of
+where the app itself runs.
 
 ## Email notifications for QSL card requests
 
@@ -186,6 +215,19 @@ presigned upload) -- simple, and avoids needing any S3 CORS
 configuration. The public map page never gets a permanent link to a
 photo; it gets a short-lived presigned GET URL, regenerated every time
 the page loads.
+
+**All of this data lives in S3, not in Render's SQLite disk** --
+`photomap_store.py` keeps every callsign location, photo card, and
+imported QSO in one JSON object at `photocards/_index.json` in the same
+bucket (deliberately inside the `photocards/` prefix the IAM policy
+below already covers, so this needed no extra AWS setup). This is the
+one part of the app that can't afford Render's free-tier ephemeral
+disk -- everything else (`contacts`, `auth_sessions`, `qsl_requests`)
+is fine being short-lived, but the whole point of the QSL Photo Map is
+that uploaded cards stick around, so its data intentionally never
+touches SQLite at all. A Render redeploy or spin-down wipes
+`instance/qsl_tracker.db` same as always, but the photo map doesn't
+notice or care.
 
 **Setup:** four env vars, in addition to what's already needed above.
 `render.yaml` sets `S3_BUCKET` and `AWS_REGION` directly (not secrets),
