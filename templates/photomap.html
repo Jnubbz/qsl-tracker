@@ -57,7 +57,7 @@
         renderDetail(cache[callsign]);
         return;
       }
-      var url = '{{ url_for("photomap_api_callsign", callsign="__CALL__") }}'.replace('__CALL__', encodeURIComponent(callsign));
+      var url = '{{ url_for("photomap_api_callsign") }}?callsign=' + encodeURIComponent(callsign);
       fetch(url)
         .then(function (r) { return r.json(); })
         .then(function (data) {

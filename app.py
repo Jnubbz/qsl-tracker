@@ -711,9 +711,16 @@ def photomap_api_pins():
     }
 
 
-@app.route("/photomap/api/callsign/<callsign>")
-def photomap_api_callsign(callsign):
-    callsign = callsign.strip().upper()
+@app.route("/photomap/api/callsign")
+def photomap_api_callsign():
+    # Callsign comes in as a query param, not a URL path segment --
+    # callsigns like FP/KJ1V contain a "/", and a "/" inside a path
+    # segment gets split into two segments (or mangled by %2F-decoding
+    # upstream of Flask) before routing ever sees it. A query string
+    # doesn't have that problem.
+    callsign = request.args.get("callsign", "").strip().upper()
+    if not callsign:
+        return {"callsign": "", "country": None, "state": None, "cards": [], "error": "Missing callsign."}, 400
     try:
         location = photomap_store.get_callsign_location(callsign)
         cards = photomap_store.get_cards_for_callsign(callsign)
