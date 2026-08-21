@@ -84,7 +84,13 @@ def upload_card_image(file_storage, callsign: str) -> str:
 
 
 def presigned_url(key: str, expires_in: int = 3600) -> str:
-    """A short-lived, view-only URL for a private object."""
+    """A short-lived, view-only URL for a private object.
+
+    Currently unused -- app.py serves QSL card photos through
+    get_object_bytes()/photomap_image() instead (see that function's
+    docstring for why). Left in place in case a future need for a
+    direct-to-S3 URL comes up and this bites the dust for a different
+    reason next time."""
     if not BUCKET:
         raise S3Error("S3_BUCKET isn't configured.")
     try:
@@ -119,6 +125,38 @@ def get_json(key: str):
         # No .response here -- this is boto3/botocore failing before a
         # request ever reached AWS (e.g. NoCredentialsError because
         # AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY aren't set).
+        raise S3Error(str(exc)) from exc
+
+
+def get_object_bytes(key: str) -> tuple[bytes, str]:
+    """Fetch a raw object's bytes and content-type from the bucket.
+
+    Used to serve QSL card photos straight through Flask (see
+    /photomap/image/<path:key> in app.py) instead of handing the
+    browser a presigned URL. Reason: presigned GET URLs for this
+    bucket kept coming back SignatureDoesNotMatch in production even
+    after multiple from-scratch IAM key rotations and character-by-
+    character verification of the secret -- while ordinary signed
+    requests through this same client (get_json/put_json above) always
+    worked fine. Since those calls share one boto3 client and one set
+    of credentials, that strongly suggested something between "URL
+    generated" and "URL fetched by the browser" was mangling or
+    otherwise not reproducing the exact bytes that were signed (e.g. a
+    network intermediary), not that the credentials were actually bad.
+    Proxying the object bytes through the same already-proven-working
+    get_object call sidesteps presigned-URL signing entirely. See
+    qsl-tracker-status.md in the project for the full debugging trail.
+    """
+    if not BUCKET:
+        raise S3Error("S3_BUCKET isn't configured.")
+    try:
+        obj = _get_client().get_object(Bucket=BUCKET, Key=key)
+        body = obj["Body"].read()
+        content_type = obj.get("ContentType") or "application/octet-stream"
+        return body, content_type
+    except ClientError as exc:
+        raise S3Error(str(exc)) from exc
+    except BotoCoreError as exc:
         raise S3Error(str(exc)) from exc
 
 

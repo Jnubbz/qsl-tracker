@@ -20,14 +20,14 @@ import time
 from datetime import date
 from functools import wraps
 
-from flask import Flask, Response, flash, redirect, render_template, request, session, url_for
+from flask import Flask, Response, abort, flash, redirect, render_template, request, session, url_for
 
 import db
 import photomap_store
 from adif import distinct_callsigns, parse_adif
 from mailer import send_qsl_request_email
 from qrz import QrzError, format_mailing_label, get_session_key, lookup_callsign, lookup_location
-from s3 import S3Error, presigned_url, upload_card_image
+from s3 import S3Error, get_object_bytes, upload_card_image
 
 # Without this, mailer.py's logger.warning()/logger.exception() calls for
 # the QSL request email (see /request-qsl below) wouldn't reliably show
@@ -529,6 +529,27 @@ def photomap():
     return render_template("photomap.html")
 
 
+@app.route("/photomap/image/<path:key>")
+def photomap_image(key):
+    """Serves a QSL card photo's bytes straight from S3 through Flask,
+    instead of redirecting the browser to a presigned S3 URL -- see
+    get_object_bytes() in s3.py for why. Restricted to the photocards/
+    prefix: this route takes a raw S3 key from the URL path, so it's
+    deliberately not a general "fetch any object" proxy."""
+    if not key.startswith("photocards/"):
+        abort(404)
+    try:
+        body, content_type = get_object_bytes(key)
+    except S3Error as exc:
+        logger.warning("QSL Photo Map S3 error: %s", exc)
+        abort(404)
+    return Response(
+        body,
+        mimetype=content_type,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
 @app.route("/photomap/api/pins")
 def photomap_api_pins():
     try:
@@ -568,12 +589,7 @@ def photomap_api_callsign(callsign):
         except S3Error as exc:
             logger.warning("QSL Photo Map S3 error: %s", exc)
             images = []
-        urls = []
-        for img in images:
-            try:
-                urls.append(presigned_url(img["s3_key"]))
-            except S3Error:
-                continue
+        urls = [url_for("photomap_image", key=img["s3_key"]) for img in images]
         result_cards.append(
             {
                 "qso_date": card["qso_date"],
