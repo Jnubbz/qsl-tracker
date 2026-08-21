@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 import os
 import secrets
 import time
@@ -24,6 +25,15 @@ import db
 from adif import distinct_callsigns, parse_adif
 from mailer import send_qsl_request_email
 from qrz import QrzError, format_mailing_label, get_session_key, lookup_callsign
+
+# Without this, mailer.py's logger.warning()/logger.exception() calls for
+# the QSL request email (see /request-qsl below) wouldn't reliably show
+# up in Render's Logs tab -- INFO/WARNING records need a configured
+# handler. force=True re-configures the root logger even if gunicorn (or
+# anything else) already attached its own handler first, so this always
+# takes effect regardless of import order.
+logging.basicConfig(level=logging.INFO, force=True)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
@@ -279,6 +289,10 @@ def request_qsl():
         # without sending an email or storing anything, so it doesn't
         # even learn the trick failed.
         if request.form.get("website"):
+            logger.warning(
+                "QSL request dropped -- honeypot field was filled (likely a bot, "
+                "or a password manager / autofill extension filling a hidden field)"
+            )
             return redirect(url_for("request_qsl_thanks"))
 
         callsign = request.form.get("callsign", "").strip().upper()[:20]
@@ -295,6 +309,7 @@ def request_qsl():
             return redirect(url_for("request_qsl"))
 
         db.save_qsl_request(session_id, callsign, note, contact_email)
+        logger.info("QSL request saved for callsign %s, sending notification email...", callsign)
         send_qsl_request_email(callsign, note, contact_email)
         return redirect(url_for("request_qsl_thanks"))
 
