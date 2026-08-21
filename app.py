@@ -107,6 +107,20 @@ def admin_required(view):
     return wrapped
 
 
+def s3_config_hint(exc: S3Error) -> str:
+    """A friendlier message for an S3Error surfaced to the admin. The
+    QSL Photo Map's data lives entirely in S3 now (see photomap_store.py)
+    -- the most common cause of a failure here is one of the AWS env
+    vars being missing or wrong on Render, not a real S3 outage."""
+    logger.warning("QSL Photo Map S3 error: %s", exc)
+    return (
+        f"Couldn't reach S3 for the QSL Photo Map's data ({exc}). Check "
+        "S3_BUCKET, AWS_REGION, AWS_ACCESS_KEY_ID, and "
+        "AWS_SECRET_ACCESS_KEY are all set correctly in Render's "
+        "Environment settings."
+    )
+
+
 @app.route("/")
 def index():
     return render_template("index.html", logged_in=bool(qrz_key_or_none()))
@@ -387,11 +401,20 @@ def admin_import_adif():
             return redirect(url_for("admin_import_adif"))
 
         qsos = parse_adif(text)
-        added = photomap_store.import_my_qsos(qsos)
+        try:
+            added = photomap_store.import_my_qsos(qsos)
+        except S3Error as exc:
+            flash(s3_config_hint(exc), "error")
+            return redirect(url_for("admin_import_adif"))
         flash(f"Imported {added} new QSO record(s) ({len(qsos)} found in the file).", "success")
         return redirect(url_for("admin_import_adif"))
 
-    return render_template("admin_import_adif.html", qso_count=photomap_store.count_my_qsos())
+    try:
+        qso_count = photomap_store.count_my_qsos()
+    except S3Error as exc:
+        flash(s3_config_hint(exc), "error")
+        qso_count = 0
+    return render_template("admin_import_adif.html", qso_count=qso_count)
 
 
 @app.route("/admin/photomap/api/qsos")
@@ -402,7 +425,11 @@ def admin_photomap_api_qsos():
     callsign = request.args.get("callsign", "").strip().upper()
     if not callsign:
         return {"qsos": []}
-    rows = photomap_store.find_my_qsos(callsign)
+    try:
+        rows = photomap_store.find_my_qsos(callsign)
+    except S3Error as exc:
+        logger.warning("QSL Photo Map S3 error: %s", exc)
+        return {"qsos": [], "error": str(exc)}
     return {"qsos": [dict(r) for r in rows]}
 
 
@@ -428,11 +455,16 @@ def admin_photomap_upload():
         rst_rcvd = request.form.get("rst_rcvd", "").strip()
         note = request.form.get("note", "").strip()
 
-        # Location is cached per callsign (callsign_locations) so a
-        # repeat upload for the same station doesn't re-hit QRZ. The
-        # admin needs a QRZ session to populate it the first time --
-        # the same login used everywhere else in the app (see /login).
-        location = photomap_store.get_callsign_location(callsign)
+        # Location is cached per callsign so a repeat upload for the
+        # same station doesn't re-hit QRZ. The admin needs a QRZ
+        # session to populate it the first time -- the same login used
+        # everywhere else in the app (see /login).
+        try:
+            location = photomap_store.get_callsign_location(callsign)
+        except S3Error as exc:
+            flash(s3_config_hint(exc), "error")
+            return redirect(url_for("admin_photomap_upload", callsign=callsign))
+
         if location is None:
             key = qrz_key_or_none()
             if not key:
@@ -444,16 +476,24 @@ def admin_photomap_upload():
                 return redirect(url_for("admin_photomap_upload", callsign=callsign))
             try:
                 loc = lookup_location(key, callsign)
-                photomap_store.save_callsign_location(loc)
-                location = photomap_store.get_callsign_location(callsign)
             except QrzError as exc:
                 flash(f"QRZ lookup failed: {exc}", "error")
                 return redirect(url_for("admin_photomap_upload", callsign=callsign))
             except Exception:
                 flash("Couldn't reach QRZ right now. Try again in a moment.", "error")
                 return redirect(url_for("admin_photomap_upload", callsign=callsign))
+            try:
+                photomap_store.save_callsign_location(loc)
+                location = photomap_store.get_callsign_location(callsign)
+            except S3Error as exc:
+                flash(s3_config_hint(exc), "error")
+                return redirect(url_for("admin_photomap_upload", callsign=callsign))
 
-        card_id = photomap_store.add_photo_card(callsign, qso_date, band, mode, freq, rst_sent, rst_rcvd, note)
+        try:
+            card_id = photomap_store.add_photo_card(callsign, qso_date, band, mode, freq, rst_sent, rst_rcvd, note)
+        except S3Error as exc:
+            flash(s3_config_hint(exc), "error")
+            return redirect(url_for("admin_photomap_upload", callsign=callsign))
 
         uploaded, failed = 0, 0
         for f in files:
@@ -472,10 +512,15 @@ def admin_photomap_upload():
         flash(message, "success" if uploaded else "error")
         return redirect(url_for("admin_photomap_upload"))
 
+    try:
+        recent_cards = photomap_store.list_recent_photo_cards(10)
+    except S3Error as exc:
+        flash(s3_config_hint(exc), "error")
+        recent_cards = []
     return render_template(
         "admin_photomap_upload.html",
         callsign_prefill=request.args.get("callsign", ""),
-        recent_cards=photomap_store.list_recent_photo_cards(10),
+        recent_cards=recent_cards,
     )
 
 
@@ -486,7 +531,11 @@ def photomap():
 
 @app.route("/photomap/api/pins")
 def photomap_api_pins():
-    points = photomap_store.list_map_points()
+    try:
+        points = photomap_store.list_map_points()
+    except S3Error as exc:
+        logger.warning("QSL Photo Map S3 error: %s", exc)
+        return {"pins": [], "error": str(exc)}
     return {
         "pins": [
             {
@@ -505,12 +554,20 @@ def photomap_api_pins():
 @app.route("/photomap/api/callsign/<callsign>")
 def photomap_api_callsign(callsign):
     callsign = callsign.strip().upper()
-    location = photomap_store.get_callsign_location(callsign)
-    cards = photomap_store.get_cards_for_callsign(callsign)
+    try:
+        location = photomap_store.get_callsign_location(callsign)
+        cards = photomap_store.get_cards_for_callsign(callsign)
+    except S3Error as exc:
+        logger.warning("QSL Photo Map S3 error: %s", exc)
+        return {"callsign": callsign, "country": None, "state": None, "cards": [], "error": str(exc)}
 
     result_cards = []
     for card in cards:
-        images = photomap_store.get_images_for_card(card["id"])
+        try:
+            images = photomap_store.get_images_for_card(card["id"])
+        except S3Error as exc:
+            logger.warning("QSL Photo Map S3 error: %s", exc)
+            images = []
         urls = []
         for img in images:
             try:

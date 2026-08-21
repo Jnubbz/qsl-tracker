@@ -25,7 +25,16 @@ import os
 import uuid
 
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
+
+# ClientError covers AWS *rejecting* a request (bad bucket, permission
+# denied, etc). BotoCoreError is the broader base class that also
+# covers boto3/botocore failing before a request even reaches AWS --
+# most importantly NoCredentialsError, which is what's raised when
+# AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY simply aren't set. That's a
+# very real, very likely-to-happen misconfiguration (an env var not
+# set yet on Render), and it is NOT a ClientError subclass -- catching
+# only ClientError let it through uncaught and crashed the whole page.
 
 BUCKET = os.environ.get("S3_BUCKET", "")
 _REGION = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
@@ -69,7 +78,7 @@ def upload_card_image(file_storage, callsign: str) -> str:
             key,
             ExtraArgs={"ContentType": content_type},
         )
-    except ClientError as exc:
+    except (ClientError, BotoCoreError) as exc:
         raise S3Error(str(exc)) from exc
     return key
 
@@ -84,7 +93,7 @@ def presigned_url(key: str, expires_in: int = 3600) -> str:
             Params={"Bucket": BUCKET, "Key": key},
             ExpiresIn=expires_in,
         )
-    except ClientError as exc:
+    except (ClientError, BotoCoreError) as exc:
         raise S3Error(str(exc)) from exc
 
 
@@ -99,9 +108,17 @@ def get_json(key: str):
         obj = _get_client().get_object(Bucket=BUCKET, Key=key)
         return json.loads(obj["Body"].read().decode("utf-8"))
     except ClientError as exc:
+        # Only ClientError (AWS actually responded) carries .response --
+        # that's how a "the object doesn't exist yet" case is told apart
+        # from a real failure below.
         code = exc.response.get("Error", {}).get("Code", "")
         if code in ("NoSuchKey", "404"):
             return None
+        raise S3Error(str(exc)) from exc
+    except BotoCoreError as exc:
+        # No .response here -- this is boto3/botocore failing before a
+        # request ever reached AWS (e.g. NoCredentialsError because
+        # AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY aren't set).
         raise S3Error(str(exc)) from exc
 
 
@@ -116,5 +133,5 @@ def put_json(key: str, data) -> None:
             Body=json.dumps(data, indent=2).encode("utf-8"),
             ContentType="application/json",
         )
-    except ClientError as exc:
+    except (ClientError, BotoCoreError) as exc:
         raise S3Error(str(exc)) from exc
