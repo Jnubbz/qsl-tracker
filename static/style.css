@@ -1,12 +1,12 @@
 :root {
-  --ink: #1b1f24;
-  --muted: #6b7280;
-  --border: #e2e5e9;
-  --accent: #1f6f4f;
+  --ink: #e7ebf0;
+  --muted: #93a1b0;
+  --border: #223247;
+  --accent: #2f9d6f;
   --accent-ink: #ffffff;
-  --danger: #b3261e;
-  --bg: #fafafa;
-  --card-bg: #ffffff;
+  --danger: #e5534b;
+  --bg: #0a1420;
+  --card-bg: #101d2e;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
@@ -86,6 +86,23 @@ input[type="file"] {
   border: 1px solid var(--border);
   border-radius: 6px;
   font-size: 1rem;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+input[type="text"]:focus,
+input[type="password"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+select {
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.9rem;
 }
 
 button {
@@ -170,7 +187,7 @@ table.contacts td {
   vertical-align: top;
 }
 
-table.contacts tr.direct { background: rgba(31, 111, 79, 0.06); }
+table.contacts tr.direct { background: rgba(47, 157, 111, 0.12); }
 
 .address-cell { white-space: pre-line; }
 
@@ -185,8 +202,8 @@ table.contacts tr.direct { background: rgba(31, 111, 79, 0.06); }
   font-size: 0.9rem;
 }
 
-.flash-success { background: #e6f4ea; color: #1f6f4f; }
-.flash-error { background: #fdecea; color: var(--danger); }
+.flash-success { background: rgba(47, 157, 111, 0.18); color: #6fd3a8; }
+.flash-error { background: rgba(229, 83, 75, 0.18); color: #ff8a82; }
 
 .site-footer {
   text-align: center;
