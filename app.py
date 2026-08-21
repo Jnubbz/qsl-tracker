@@ -5,15 +5,20 @@ ones want a direct paper QSL card.
 No accounts: each visitor gets an anonymous session id (stored in a
 signed cookie) that scopes their results in SQLite. Visitors log in
 with their own QRZ XML subscriber credentials; we exchange those for a
-short-lived QRZ session key and never store the password.
+short-lived QRZ session key and never store the password. That QRZ
+session key lives server-side (SQLite, keyed by the anonymous session
+id) rather than in the cookie itself -- see db.py's auth_sessions table.
 """
 from __future__ import annotations
 
+import csv
+import io
 import os
 import secrets
 import time
+from datetime import date
 
-from flask import Flask, flash, redirect, render_template, request, session, url_for
+from flask import Flask, Response, flash, redirect, render_template, request, session, url_for
 
 import db
 from adif import distinct_callsigns, parse_adif
@@ -56,8 +61,14 @@ def ensure_session():
     db.purge_expired()
 
 
+def current_auth():
+    """The (qrz_key, qrz_username) row for this visitor, or None."""
+    return db.get_auth(session["session_id"])
+
+
 def qrz_key_or_none():
-    return session.get("qrz_key")
+    auth = current_auth()
+    return auth["qrz_key"] if auth else None
 
 
 @app.route("/")
@@ -82,17 +93,17 @@ def login():
         flash("Couldn't reach QRZ right now. Try again in a moment.", "error")
         return redirect(url_for("index"))
 
-    # Only the short-lived session key is kept -- never the password.
-    session["qrz_key"] = key
-    session["qrz_username"] = username
+    # Only the short-lived session key is kept -- never the password --
+    # and it's stored server-side, keyed by the anonymous session id,
+    # rather than in the cookie itself.
+    db.save_auth(session["session_id"], key, username)
     flash("Logged in to QRZ.", "success")
     return redirect(url_for("dashboard"))
 
 
 @app.route("/logout", methods=["POST"])
 def logout():
-    session.pop("qrz_key", None)
-    session.pop("qrz_username", None)
+    db.clear_auth(session["session_id"])
     return redirect(url_for("index"))
 
 
@@ -104,11 +115,42 @@ def dashboard():
 
     direct_only = request.args.get("filter") == "direct"
     contacts = db.get_contacts(session["session_id"], direct_only=direct_only)
+    auth = current_auth()
     return render_template(
         "dashboard.html",
         contacts=contacts,
         direct_only=direct_only,
-        qrz_username=session.get("qrz_username"),
+        qrz_username=auth["qrz_username"] if auth else None,
+    )
+
+
+@app.route("/export.csv")
+def export_csv():
+    if not qrz_key_or_none():
+        flash("Log in with your QRZ credentials first.", "error")
+        return redirect(url_for("index"))
+
+    # Mailing labels only make sense for contacts we actually kept an
+    # address for, regardless of which filter the dashboard table
+    # happens to be showing right now.
+    contacts = db.get_contacts(session["session_id"], direct_only=True)
+    if not contacts:
+        flash("No direct-QSL contacts with an address to export yet.", "error")
+        return redirect(url_for("dashboard"))
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["Callsign", "Name", "Address", "City", "State", "Zip", "Country"])
+    for c in contacts:
+        writer.writerow(
+            [c["callsign"], c["name"], c["address"], c["city"], c["state"], c["zip_code"], c["country"]]
+        )
+
+    filename = f"qsl-direct-contacts-{date.today().isoformat()}.csv"
+    return Response(
+        buffer.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
 

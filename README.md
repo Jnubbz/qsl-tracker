@@ -13,8 +13,9 @@ Part of the [KN0BLE.com](https://kn0ble.com) site, callsign KN0BLE.
   keeps their results separate from everyone else's.
 - Visitors log in with their **own** QRZ XML subscriber username and
   password. Those credentials are used once to fetch a short-lived QRZ
-  session key and are never stored -- only the session key lives in the
-  cookie for the rest of the visit.
+  session key and are never stored -- the key itself lives server-side
+  in SQLite, keyed by the anonymous session id; the cookie only ever
+  holds that id, never the key.
 - Look up a single callsign, or upload an `.adi` / `.adif` log file to
   look up every callsign in it (capped at 200 per upload). Uploads pace
   their QRZ lookups with a short delay between each, and will stop
@@ -36,6 +37,10 @@ Part of the [KN0BLE.com](https://kn0ble.com) site, callsign KN0BLE.
   up in the list with `not stored` in the address column.
 - A toggle switches between "all looked-up contacts" and "direct QSL
   only".
+- "Export CSV" downloads a mail-merge-ready CSV (callsign, name, address,
+  city, state, zip, country) of every direct-QSL contact with an address
+  on file -- independent of whichever table filter is currently active,
+  since a mailing list only makes sense for contacts with an address.
 - Results are stored in SQLite, scoped to your session, and purged
   automatically after 24 hours.
 
@@ -77,9 +82,14 @@ config automatically:
 spin-down after inactivity wipes `instance/qsl_tracker.db`. Given results
 already auto-purge after 24h and there are no accounts, that's a fairly
 soft loss (an active visitor mid-session on a restart would just need to
-re-search), but if that ever matters, add a persistent disk to
-`render.yaml` (Starter plan or above; the free plan doesn't support
-disks):
+re-search). It also now means a visitor's *login* resets on
+redeploy/spin-down too, since the QRZ session key moved into that same
+database (see "server-side session store" below) -- that trade is worth
+it (nothing sensitive sits in the browser's cookie anymore) but it's a
+real behavior change from before, when the cookie alone kept someone
+logged in across a restart. If either of these ever matters more than
+the trade is worth, add a persistent disk to `render.yaml` (Starter plan
+or above; the free plan doesn't support disks):
 
 ```yaml
     disk:
@@ -97,9 +107,12 @@ Early / brainstorming-to-working-prototype stage. Next up:
 - [x] Rate-limit QRZ lookups more carefully -- uploads now pace requests,
       cap themselves to a time budget, and back off on repeated failures
       (see the note above)
-- [ ] Consider a server-side session store instead of the signed cookie,
-      since it currently holds the QRZ session key
-- [ ] Export results (CSV) for printing mailing labels
+- [x] Server-side session store for the QRZ session key -- it now lives
+      in SQLite (`auth_sessions`, keyed by the anonymous session id) and
+      the cookie only ever carries that id, never the key itself
+- [x] Export results (CSV) for printing mailing labels -- "Export CSV"
+      link on the dashboard, always the direct-QSL contacts with an
+      address on file regardless of which table filter is active
 
 ## License
 

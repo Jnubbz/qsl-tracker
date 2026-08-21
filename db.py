@@ -1,10 +1,14 @@
 """
-SQLite storage for looked-up contacts.
+SQLite storage for looked-up contacts and QRZ auth state.
 
 Every row is tagged with an anonymous `session_id` (a random token kept
 in the visitor's Flask session cookie) so concurrent visitors never see
 each other's results -- there are no user accounts. Rows older than
 SESSION_TTL_HOURS are purged on access so nothing lingers indefinitely.
+
+The QRZ session key (obtained once at login, never the password itself)
+lives here too, in `auth_sessions`, rather than in the cookie -- the
+cookie only ever holds the anonymous `session_id` used to look it up.
 """
 from __future__ import annotations
 
@@ -37,6 +41,13 @@ CREATE TABLE IF NOT EXISTS contacts (
     UNIQUE(session_id, callsign)
 );
 CREATE INDEX IF NOT EXISTS idx_contacts_session ON contacts(session_id);
+
+CREATE TABLE IF NOT EXISTS auth_sessions (
+    session_id TEXT PRIMARY KEY,
+    qrz_key TEXT NOT NULL,
+    qrz_username TEXT,
+    created_at REAL NOT NULL
+);
 """
 
 
@@ -61,6 +72,37 @@ def purge_expired() -> None:
     cutoff = time.time() - SESSION_TTL_HOURS * 3600
     with get_conn() as conn:
         conn.execute("DELETE FROM contacts WHERE looked_up_at < ?", (cutoff,))
+        conn.execute("DELETE FROM auth_sessions WHERE created_at < ?", (cutoff,))
+
+
+def save_auth(session_id: str, qrz_key: str, qrz_username: str) -> None:
+    """Store (or replace) the QRZ session key for an anonymous session."""
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO auth_sessions (session_id, qrz_key, qrz_username, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(session_id) DO UPDATE SET
+                qrz_key=excluded.qrz_key,
+                qrz_username=excluded.qrz_username,
+                created_at=excluded.created_at
+            """,
+            (session_id, qrz_key, qrz_username, time.time()),
+        )
+
+
+def get_auth(session_id: str) -> sqlite3.Row | None:
+    """Return the (qrz_key, qrz_username) row for a session, or None."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT qrz_key, qrz_username FROM auth_sessions WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+
+
+def clear_auth(session_id: str) -> None:
+    with get_conn() as conn:
+        conn.execute("DELETE FROM auth_sessions WHERE session_id = ?", (session_id,))
 
 
 def upsert_contact(session_id: str, record) -> None:

@@ -30,9 +30,12 @@
         <a class="{{ 'active' if not direct_only else '' }}" href="{{ url_for('dashboard') }}">All contacts</a>
         <a class="{{ 'active' if direct_only else '' }}" href="{{ url_for('dashboard', filter='direct') }}">Direct QSL only</a>
       </div>
-      <form method="post" action="{{ url_for('clear') }}" onsubmit="return confirm('Clear all results for this session?');">
-        <button type="submit" class="link-button danger">Clear results</button>
-      </form>
+      <div class="results-actions">
+        <a class="link-button" href="{{ url_for('export_csv') }}">Export CSV (mailing labels)</a>
+        <form method="post" action="{{ url_for('clear') }}" onsubmit="return confirm('Clear all results for this session?');">
+          <button type="submit" class="link-button danger">Clear results</button>
+        </form>
+      </div>
     </div>
 
     {% if contacts %}
