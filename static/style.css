@@ -36,6 +36,22 @@ body {
   margin: 0.25rem 0 0;
 }
 
+.site-nav {
+  margin-top: 0.75rem;
+  display: flex;
+  justify-content: center;
+  gap: 1.25rem;
+}
+
+.site-nav a {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.site-nav a:hover { color: var(--ink); }
+
 main {
   max-width: 900px;
   margin: 0 auto;
@@ -189,4 +205,27 @@ table.contacts tr.direct { background: rgba(31, 111, 79, 0.06); }
   width: 1px;
   height: 1px;
   overflow: hidden;
+}
+
+/* QSL Photo Map */
+#map {
+  height: 480px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.photomap-entry {
+  padding: 1rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.photomap-entry:first-child { border-top: none; }
+
+.photomap-img {
+  max-width: 100%;
+  width: 320px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  margin: 0.5rem 0.5rem 0.5rem 0;
 }

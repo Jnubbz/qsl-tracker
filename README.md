@@ -156,6 +156,66 @@ IPv4-only if a Render outbound connection fails instantly rather than
 timing out) is worth remembering for anything else this app might ever
 connect to.
 
+## QSL Photo Map
+
+`/photomap` is a public world map (Leaflet + OpenStreetMap tiles, clustered
+markers) plotting scanned QSL cards by station. Click a pin to see the
+card photo(s) and QSO details for that callsign.
+
+Uploading is admin-only (just Josh) -- there's no public upload:
+
+- `/admin/login` -- a single shared password, checked against the
+  `ADMIN_PASSWORD` env var. Separate from the QRZ login system the rest
+  of the app uses (that's per-visitor and anonymous; this is one
+  person's admin area).
+- `/admin/photomap/import-adif` -- upload your own ADIF log so the
+  upload form below can auto-fill QSO details (date/band/mode/frequency/
+  RST) for a callsign instead of typing them by hand. Safe to re-upload
+  the same or an overlapping log -- duplicates are skipped. This never
+  touches QRZ; it only reads your log file.
+- `/admin/photomap/upload` -- pick a callsign, attach one or more
+  front-of-card photos, fill in (or accept the auto-filled) QSO details,
+  save. A callsign's map location (country/state/grid/lat-lon) is looked
+  up from QRZ the first time it's uploaded and cached from then on --
+  requires being logged in with your QRZ credentials (same login as the
+  rest of the app) the first time a given callsign is used.
+
+Photos are stored in a private S3 bucket and relayed straight through the
+Flask app on upload (a normal multipart form post, not a direct-to-S3
+presigned upload) -- simple, and avoids needing any S3 CORS
+configuration. The public map page never gets a permanent link to a
+photo; it gets a short-lived presigned GET URL, regenerated every time
+the page loads.
+
+**Setup:** four env vars, in addition to what's already needed above.
+`render.yaml` sets `S3_BUCKET` and `AWS_REGION` directly (not secrets),
+and declares the rest with `sync: false` so Render prompts for them in
+the dashboard instead of storing them in the repo:
+
+- `S3_BUCKET` / `AWS_REGION` -- already set in `render.yaml` for Josh's
+  bucket (`kn0ble-qsl-...-us-east-2`, region `us-east-2`).
+- `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` -- credentials for an IAM
+  user or role scoped to just this bucket. Minimal policy:
+  ```json
+  {
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:GetObject"],
+      "Resource": "arn:aws:s3:::kn0ble-qsl-.../photocards/*"
+    }]
+  }
+  ```
+  (swap in the real bucket name; no `s3:ListBucket` or account-wide
+  access needed).
+- `ADMIN_PASSWORD` -- whatever password gates `/admin/login`. Pick
+  something you don't use anywhere else -- it's checked with a
+  constant-time compare but is otherwise a plain shared password, not
+  hashed at rest.
+
+If any of the AWS vars are missing, the admin upload form will show an
+S3 error when you try to save a card rather than failing silently.
+
 ## Project status
 
 Early / brainstorming-to-working-prototype stage. Next up:
@@ -175,6 +235,8 @@ Early / brainstorming-to-working-prototype stage. Next up:
 - [x] "Request a QSL Card" -- public form (embedded on kn0ble.com) for
       visitors to request a card back, emailed to Josh via Gmail SMTP
       (see "Email notifications" above)
+- [x] QSL Photo Map -- public `/photomap` (world map of scanned cards)
+      plus an admin-only upload/import flow; see "QSL Photo Map" above
 
 ## License
 

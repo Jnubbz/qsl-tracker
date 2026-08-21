@@ -5,11 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}QSL Tracker{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  {% block extra_head %}{% endblock %}
 </head>
 <body>
   <header class="site-header">
     <a class="brand" href="{{ url_for('index') }}">QSL Tracker</a>
     <p class="tagline">Find out who wants a direct paper QSL card.</p>
+    <nav class="site-nav">
+      <a href="{{ url_for('index') }}">Dashboard</a>
+      <a href="{{ url_for('photomap') }}">QSL Photo Map</a>
+    </nav>
   </header>
 
   <main>

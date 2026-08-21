@@ -65,6 +65,27 @@ class QrzRecord:
         )
 
 
+@dataclass
+class QrzLocation:
+    """Just the location fields for a callsign -- country, state, county,
+    grid square, and lat/lon -- for the QSL Photo Map. Deliberately a
+    separate lookup from lookup_callsign() below: that function withholds
+    country/state/address entirely unless accepts_direct is true, since
+    it's built around "who do I mail a card to" and Josh already spent a
+    long debugging session getting that gating right. The photo map only
+    ever plots an approximate public location (QRZ's lat/lon for a
+    callsign is typically grid-square-derived, not a street address), so
+    it doesn't need or want that gating -- hence its own lookup instead
+    of loosening the address-filter logic elsewhere."""
+    callsign: str
+    country: str = ""
+    state: str = ""
+    county: str = ""
+    grid: str = ""
+    lat: float | None = None
+    lon: float | None = None
+
+
 def _text(el, tag: str) -> str:
     node = el.find(f"qrz:{tag}", NS)
     return node.text.strip() if node is not None and node.text else ""
@@ -173,4 +194,43 @@ def lookup_callsign(session_key: str, callsign: str) -> QrzRecord:
         lotw=lotw,
         qsl_via=qslmgr,
         accepts_direct=accepts_direct,
+    )
+
+
+def lookup_location(session_key: str, callsign: str) -> QrzLocation:
+    """Look up just country/state/county/grid/lat/lon for a callsign --
+    see QrzLocation above for why this is separate from lookup_callsign()."""
+    resp = requests.get(
+        QRZ_XML_URL,
+        params={"s": session_key, "callsign": callsign},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    root = ET.fromstring(resp.text)
+
+    session = root.find("qrz:Session", NS)
+    if session is not None:
+        error = _text(session, "Error")
+        if error:
+            raise QrzError(error)
+
+    callsign_el = root.find("qrz:Callsign", NS)
+    if callsign_el is None:
+        raise QrzError(f"No QRZ record found for {callsign}.")
+
+    def _float(tag: str) -> float | None:
+        raw = _text(callsign_el, tag)
+        try:
+            return float(raw) if raw else None
+        except ValueError:
+            return None
+
+    return QrzLocation(
+        callsign=_text(callsign_el, "call") or callsign.upper(),
+        country=_text(callsign_el, "country"),
+        state=_text(callsign_el, "state"),
+        county=_text(callsign_el, "county"),
+        grid=_text(callsign_el, "grid"),
+        lat=_float("lat"),
+        lon=_float("lon"),
     )

@@ -18,13 +18,15 @@ import os
 import secrets
 import time
 from datetime import date
+from functools import wraps
 
 from flask import Flask, Response, flash, redirect, render_template, request, session, url_for
 
 import db
 from adif import distinct_callsigns, parse_adif
 from mailer import send_qsl_request_email
-from qrz import QrzError, format_mailing_label, get_session_key, lookup_callsign
+from qrz import QrzError, format_mailing_label, get_session_key, lookup_callsign, lookup_location
+from s3 import S3Error, presigned_url, upload_card_image
 
 # Without this, mailer.py's logger.warning()/logger.exception() calls for
 # the QSL request email (see /request-qsl below) wouldn't reliably show
@@ -70,6 +72,12 @@ MAX_CONSECUTIVE_FAILURES = 5
 QSL_REQUEST_RATE_LIMIT = 3
 QSL_REQUEST_RATE_WINDOW_SECONDS = 600
 
+# Gates the QSL Photo Map's upload/import pages -- just Josh, not the
+# QRZ-login system the rest of the app uses (that's per-visitor and
+# anonymous; this is one person's admin area). Unset in an environment
+# that hasn't configured it yet -- see admin_login() below.
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+
 
 @app.before_request
 def ensure_session():
@@ -86,6 +94,16 @@ def current_auth():
 def qrz_key_or_none():
     auth = current_auth()
     return auth["qrz_key"] if auth else None
+
+
+def admin_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("is_admin"):
+            flash("Log in as admin first.", "error")
+            return redirect(url_for("admin_login", next=request.path))
+        return view(*args, **kwargs)
+    return wrapped
 
 
 @app.route("/")
@@ -319,6 +337,204 @@ def request_qsl():
 @app.route("/request-qsl/thanks")
 def request_qsl_thanks():
     return render_template("request_qsl_thanks.html")
+
+
+# ---------------------------------------------------------------------
+# QSL Photo Map -- admin (Josh-only) upload/import, plus the public map.
+# ---------------------------------------------------------------------
+
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        next_url = request.form.get("next") or url_for("admin_photomap_upload")
+        if not ADMIN_PASSWORD:
+            flash("Admin login isn't configured yet (ADMIN_PASSWORD isn't set on the server).", "error")
+        elif secrets.compare_digest(password, ADMIN_PASSWORD):
+            session["is_admin"] = True
+            flash("Logged in.", "success")
+            return redirect(next_url)
+        else:
+            flash("Wrong password.", "error")
+    return render_template("admin_login.html", next=request.args.get("next", ""))
+
+
+@app.route("/admin/logout", methods=["POST"])
+def admin_logout():
+    session.pop("is_admin", None)
+    flash("Logged out.", "success")
+    return redirect(url_for("index"))
+
+
+@app.route("/admin/photomap/import-adif", methods=["GET", "POST"])
+@admin_required
+def admin_import_adif():
+    """Upload Josh's own ADIF log so the photo-upload form below can
+    offer to auto-fill QSO details for a callsign. Separate from the
+    main dashboard's /upload -- that one drives QRZ lookups per visitor
+    and doesn't keep QSO details; this one keeps the QSO details
+    (date/band/mode/freq/RST) and never touches QRZ."""
+    if request.method == "POST":
+        file = request.files.get("adif_file")
+        if not file or not file.filename:
+            flash("Choose an ADIF (.adi) file to upload.", "error")
+            return redirect(url_for("admin_import_adif"))
+        try:
+            text = file.read().decode("utf-8", errors="ignore")
+        except Exception:
+            flash("Couldn't read that file.", "error")
+            return redirect(url_for("admin_import_adif"))
+
+        qsos = parse_adif(text)
+        added = db.import_my_qsos(qsos)
+        flash(f"Imported {added} new QSO record(s) ({len(qsos)} found in the file).", "success")
+        return redirect(url_for("admin_import_adif"))
+
+    return render_template("admin_import_adif.html", qso_count=db.count_my_qsos())
+
+
+@app.route("/admin/photomap/api/qsos")
+@admin_required
+def admin_photomap_api_qsos():
+    """JSON list of Josh's logged QSOs for one callsign, used by the
+    upload form's JS to offer auto-filling date/band/mode/freq/RST."""
+    callsign = request.args.get("callsign", "").strip().upper()
+    if not callsign:
+        return {"qsos": []}
+    rows = db.find_my_qsos(callsign)
+    return {"qsos": [dict(r) for r in rows]}
+
+
+@app.route("/admin/photomap/upload", methods=["GET", "POST"])
+@admin_required
+def admin_photomap_upload():
+    if request.method == "POST":
+        callsign = request.form.get("callsign", "").strip().upper()
+        if not callsign:
+            flash("Enter a callsign.", "error")
+            return redirect(url_for("admin_photomap_upload"))
+
+        files = [f for f in request.files.getlist("images") if f and f.filename]
+        if not files:
+            flash("Choose at least one photo of the card front.", "error")
+            return redirect(url_for("admin_photomap_upload", callsign=callsign))
+
+        qso_date = request.form.get("qso_date", "").strip()
+        band = request.form.get("band", "").strip().upper()
+        mode = request.form.get("mode", "").strip().upper()
+        freq = request.form.get("freq", "").strip()
+        rst_sent = request.form.get("rst_sent", "").strip()
+        rst_rcvd = request.form.get("rst_rcvd", "").strip()
+        note = request.form.get("note", "").strip()
+
+        # Location is cached per callsign (callsign_locations) so a
+        # repeat upload for the same station doesn't re-hit QRZ. The
+        # admin needs a QRZ session to populate it the first time --
+        # the same login used everywhere else in the app (see /login).
+        location = db.get_callsign_location(callsign)
+        if location is None:
+            key = qrz_key_or_none()
+            if not key:
+                flash(
+                    "Log in with your QRZ credentials first (top of the site) so "
+                    f"{callsign}'s location can be looked up.",
+                    "error",
+                )
+                return redirect(url_for("admin_photomap_upload", callsign=callsign))
+            try:
+                loc = lookup_location(key, callsign)
+                db.save_callsign_location(loc)
+                location = db.get_callsign_location(callsign)
+            except QrzError as exc:
+                flash(f"QRZ lookup failed: {exc}", "error")
+                return redirect(url_for("admin_photomap_upload", callsign=callsign))
+            except Exception:
+                flash("Couldn't reach QRZ right now. Try again in a moment.", "error")
+                return redirect(url_for("admin_photomap_upload", callsign=callsign))
+
+        card_id = db.add_photo_card(callsign, qso_date, band, mode, freq, rst_sent, rst_rcvd, note)
+
+        uploaded, failed = 0, 0
+        for f in files:
+            try:
+                key = upload_card_image(f, callsign)
+                db.add_photo_card_image(card_id, key)
+                uploaded += 1
+            except S3Error:
+                failed += 1
+
+        message = f"Saved {callsign} with {uploaded} photo(s)."
+        if location and (location["lat"] is None or location["lon"] is None):
+            message += " QRZ has no grid/lat-lon on file for this station, so it won't show up on the map yet."
+        if failed:
+            message += f" {failed} image(s) failed to upload to S3."
+        flash(message, "success" if uploaded else "error")
+        return redirect(url_for("admin_photomap_upload"))
+
+    return render_template(
+        "admin_photomap_upload.html",
+        callsign_prefill=request.args.get("callsign", ""),
+        recent_cards=db.list_recent_photo_cards(10),
+    )
+
+
+@app.route("/photomap")
+def photomap():
+    return render_template("photomap.html")
+
+
+@app.route("/photomap/api/pins")
+def photomap_api_pins():
+    points = db.list_map_points()
+    return {
+        "pins": [
+            {
+                "callsign": p["callsign"],
+                "lat": p["lat"],
+                "lon": p["lon"],
+                "country": p["country"],
+                "state": p["state"],
+                "card_count": p["card_count"],
+            }
+            for p in points
+        ]
+    }
+
+
+@app.route("/photomap/api/callsign/<callsign>")
+def photomap_api_callsign(callsign):
+    callsign = callsign.strip().upper()
+    location = db.get_callsign_location(callsign)
+    cards = db.get_cards_for_callsign(callsign)
+
+    result_cards = []
+    for card in cards:
+        images = db.get_images_for_card(card["id"])
+        urls = []
+        for img in images:
+            try:
+                urls.append(presigned_url(img["s3_key"]))
+            except S3Error:
+                continue
+        result_cards.append(
+            {
+                "qso_date": card["qso_date"],
+                "band": card["band"],
+                "mode": card["mode"],
+                "freq": card["freq"],
+                "rst_sent": card["rst_sent"],
+                "rst_rcvd": card["rst_rcvd"],
+                "note": card["note"],
+                "images": urls,
+            }
+        )
+
+    return {
+        "callsign": callsign,
+        "country": location["country"] if location else None,
+        "state": location["state"] if location else None,
+        "cards": result_cards,
+    }
 
 
 if __name__ == "__main__":
