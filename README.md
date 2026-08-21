@@ -16,7 +16,13 @@ Part of the [KN0BLE.com](https://kn0ble.com) site, callsign KN0BLE.
   session key and are never stored -- only the session key lives in the
   cookie for the rest of the visit.
 - Look up a single callsign, or upload an `.adi` / `.adif` log file to
-  look up every callsign in it (capped at 200 per upload).
+  look up every callsign in it (capped at 200 per upload). Uploads pace
+  their QRZ lookups with a short delay between each, and will stop
+  early -- with a clear message about how many were completed -- if
+  either the request is running long enough to risk a host-level timeout
+  or QRZ starts erroring repeatedly in a row. Re-uploading the same file
+  picks up the rest (it re-fetches everything, not just what's missing,
+  so it's a little wasteful on a very large log, but simple and correct).
 - A mailing address is only kept for operators who look like they want a
   direct card: an address is on file, QRZ's `mqsl` field isn't explicitly
   set to "no" (most operators never set it either way, so a blank `mqsl`
@@ -88,7 +94,9 @@ Early / brainstorming-to-working-prototype stage. Next up:
 
 - [x] Deploy a public instance -- `render.yaml` added; run through Render
       dashboard to go live (see above)
-- [ ] Rate-limit QRZ lookups more carefully (QRZ throttles heavy use)
+- [x] Rate-limit QRZ lookups more carefully -- uploads now pace requests,
+      cap themselves to a time budget, and back off on repeated failures
+      (see the note above)
 - [ ] Consider a server-side session store instead of the signed cookie,
       since it currently holds the QRZ session key
 - [ ] Export results (CSV) for printing mailing labels

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import secrets
+import time
 
 from flask import Flask, flash, redirect, render_template, request, session, url_for
 
@@ -25,6 +26,27 @@ db.init_db()
 # Cap how many callsigns we'll look up from a single ADIF upload in one
 # request, so one big log file can't tie up the server or hammer QRZ.
 MAX_LOOKUPS_PER_UPLOAD = 200
+
+# An ADIF upload does its QRZ lookups synchronously, inside the request
+# that's serving the page -- there's no background job queue. Render's
+# reverse proxy kills requests that run too long (historically ~30s),
+# and 200 sequential QRZ round-trips at even a few hundred ms each can
+# blow past that on its own, before any deliberate pacing. So instead of
+# trusting MAX_LOOKUPS_PER_UPLOAD alone, the loop below watches the
+# clock and stops itself with time to spare, always returning a normal
+# response rather than risking a hard proxy timeout that looks like the
+# app crashed.
+UPLOAD_TIME_BUDGET_SECONDS = 20
+
+# A small pause between lookups so a big upload doesn't fire QRZ
+# requests back-to-back as fast as the network allows -- QRZ doesn't
+# publish a rate limit, but there's no reason to hammer it.
+LOOKUP_DELAY_SECONDS = 0.2
+
+# If QRZ starts erroring on every request (e.g. throttling, an outage,
+# or the session key going bad mid-batch), stop after a few in a row
+# instead of grinding through the rest of the list for no reason.
+MAX_CONSECUTIVE_FAILURES = 5
 
 
 @app.before_request
@@ -140,19 +162,46 @@ def upload():
         return redirect(url_for("dashboard"))
 
     looked_up, failed = 0, 0
-    for callsign in callsigns:
+    consecutive_failures = 0
+    stopped_early = None
+    started_at = time.monotonic()
+
+    for i, callsign in enumerate(callsigns):
+        if time.monotonic() - started_at > UPLOAD_TIME_BUDGET_SECONDS:
+            stopped_early = "ran out of time for this request"
+            break
+        if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+            stopped_early = "QRZ failed several times in a row"
+            break
+
         try:
             record = lookup_callsign(key, callsign)
             db.upsert_contact(session["session_id"], record)
             looked_up += 1
+            consecutive_failures = 0
         except QrzError:
             failed += 1
+            consecutive_failures += 1
         except Exception:
             failed += 1
+            consecutive_failures += 1
 
+        if i < len(callsigns) - 1:
+            time.sleep(LOOKUP_DELAY_SECONDS)
+
+    processed = looked_up + failed
     message = f"Looked up {looked_up} of {len(callsigns)} callsigns from your log."
     if failed:
         message += f" ({failed} failed or had no QRZ record.)"
+    if stopped_early:
+        remaining = len(callsigns) - processed
+        message += (
+            f" Stopped after {processed} because {stopped_early}"
+            f" -- {remaining} callsign{'s' if remaining != 1 else ''} left."
+            " Upload the log again to pick up where this left off"
+            " (already-found contacts won't need re-fetching to show up,"
+            " but will be looked up again too)."
+        )
     flash(message, "success" if looked_up else "error")
     return redirect(url_for("dashboard"))
 
