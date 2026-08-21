@@ -43,7 +43,10 @@ Part of the [KN0BLE.com](https://kn0ble.com) site, callsign KN0BLE.
   own lines inside that one cell -- select it, paste, and it's a
   complete label, no reassembling separate columns. Independent of
   whichever table filter is currently active, since a mailing list only
-  makes sense for contacts with an address.
+  makes sense for contacts with an address. Clicking the link shows a
+  one-time heads-up that those cells have line breaks baked in, since
+  most spreadsheet apps don't auto-expand row height to show them --
+  turning on "Wrap Text" (or widening the row) reveals the full address.
 - Results are stored in SQLite, scoped to your session, and purged
   automatically after 24 hours.
 
