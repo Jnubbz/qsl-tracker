@@ -33,6 +33,7 @@
     }).addTo(map);
 
     var clusters = L.markerClusterGroup();
+    var cache = {}; // callsign -> already-fetched detail JSON, so re-clicking a pin doesn't re-fetch
 
     fetch('{{ url_for("photomap_api_pins") }}')
       .then(function (r) { return r.json(); })
@@ -41,7 +42,7 @@
         pins.forEach(function (pin) {
           var marker = L.marker([pin.lat, pin.lon]);
           marker.bindTooltip(pin.callsign + (pin.card_count > 1 ? ' (' + pin.card_count + ')' : ''));
-          marker.on('click', function () { showCallsign(pin.callsign); });
+          marker.on('click', function () { onPinClick(pin.callsign, marker); });
           clusters.addLayer(marker);
         });
         map.addLayer(clusters);
@@ -50,48 +51,110 @@
         }
       });
 
-    function showCallsign(callsign) {
+    function onPinClick(callsign, marker) {
+      if (cache[callsign]) {
+        openPopup(cache[callsign], marker);
+        renderDetail(cache[callsign]);
+        return;
+      }
       var url = '{{ url_for("photomap_api_callsign", callsign="__CALL__") }}'.replace('__CALL__', encodeURIComponent(callsign));
       fetch(url)
         .then(function (r) { return r.json(); })
         .then(function (data) {
-          var detail = document.getElementById('detail-card');
-          document.getElementById('detail-callsign').textContent = data.callsign;
-          document.getElementById('detail-location').textContent = [data.state, data.country].filter(Boolean).join(', ');
-
-          var container = document.getElementById('detail-cards');
-          container.innerHTML = '';
-          (data.cards || []).forEach(function (card) {
-            var block = document.createElement('div');
-            block.className = 'photomap-entry';
-
-            var meta = [card.qso_date, card.band, card.mode, card.freq ? card.freq + ' MHz' : '']
-              .filter(Boolean).join(' · ');
-            var metaEl = document.createElement('p');
-            metaEl.className = 'muted';
-            metaEl.textContent = meta || 'No QSO details recorded';
-            block.appendChild(metaEl);
-
-            if (card.note) {
-              var noteEl = document.createElement('p');
-              noteEl.textContent = card.note;
-              block.appendChild(noteEl);
-            }
-
-            (card.images || []).forEach(function (imgUrl) {
-              var img = document.createElement('img');
-              img.src = imgUrl;
-              img.alt = data.callsign + ' QSL card';
-              img.className = 'photomap-img';
-              block.appendChild(img);
-            });
-
-            container.appendChild(block);
-          });
-
-          detail.style.display = 'block';
-          detail.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          cache[callsign] = data;
+          openPopup(data, marker);
+          renderDetail(data);
         });
+    }
+
+    // Shows the card's photo right at the pin -- the quickest way to see
+    // it without scrolling. Just the first photo (of the first card) as
+    // a thumbnail; anything beyond that is in the detail panel below.
+    function openPopup(data, marker) {
+      var box = document.createElement('div');
+      box.className = 'photomap-popup';
+
+      var title = document.createElement('strong');
+      title.textContent = data.callsign;
+      box.appendChild(title);
+
+      var loc = [data.state, data.country].filter(Boolean).join(', ');
+      if (loc) {
+        var locEl = document.createElement('div');
+        locEl.className = 'muted';
+        locEl.textContent = loc;
+        box.appendChild(locEl);
+      }
+
+      var cards = data.cards || [];
+      var firstImage = cards.length && cards[0].images && cards[0].images[0];
+      if (firstImage) {
+        var link = document.createElement('a');
+        link.href = firstImage;
+        link.target = '_blank';
+        link.rel = 'noopener';
+        var img = document.createElement('img');
+        img.src = firstImage;
+        img.alt = data.callsign + ' QSL card';
+        img.className = 'photomap-popup-img';
+        link.appendChild(img);
+        box.appendChild(link);
+      } else {
+        var none = document.createElement('div');
+        none.className = 'muted';
+        none.textContent = 'No photo on file.';
+        box.appendChild(none);
+      }
+
+      var totalImages = cards.reduce(function (n, c) { return n + ((c.images && c.images.length) || 0); }, 0);
+      if (totalImages > 1) {
+        var more = document.createElement('div');
+        more.className = 'muted';
+        more.textContent = totalImages + ' photos total -- see all below';
+        box.appendChild(more);
+      }
+
+      marker.bindPopup(box, { maxWidth: 260 }).openPopup();
+    }
+
+    // Full gallery -- every card and every photo for this callsign,
+    // below the map, for when there's more than the popup's one preview.
+    function renderDetail(data) {
+      var detail = document.getElementById('detail-card');
+      document.getElementById('detail-callsign').textContent = data.callsign;
+      document.getElementById('detail-location').textContent = [data.state, data.country].filter(Boolean).join(', ');
+
+      var container = document.getElementById('detail-cards');
+      container.innerHTML = '';
+      (data.cards || []).forEach(function (card) {
+        var block = document.createElement('div');
+        block.className = 'photomap-entry';
+
+        var meta = [card.qso_date, card.band, card.mode, card.freq ? card.freq + ' MHz' : '']
+          .filter(Boolean).join(' · ');
+        var metaEl = document.createElement('p');
+        metaEl.className = 'muted';
+        metaEl.textContent = meta || 'No QSO details recorded';
+        block.appendChild(metaEl);
+
+        if (card.note) {
+          var noteEl = document.createElement('p');
+          noteEl.textContent = card.note;
+          block.appendChild(noteEl);
+        }
+
+        (card.images || []).forEach(function (imgUrl) {
+          var img = document.createElement('img');
+          img.src = imgUrl;
+          img.alt = data.callsign + ' QSL card';
+          img.className = 'photomap-img';
+          block.appendChild(img);
+        });
+
+        container.appendChild(block);
+      });
+
+      detail.style.display = 'block';
     }
   })();
   </script>

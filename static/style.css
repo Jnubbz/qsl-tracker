@@ -229,3 +229,15 @@ table.contacts tr.direct { background: rgba(31, 111, 79, 0.06); }
   border: 1px solid var(--border);
   margin: 0.5rem 0.5rem 0.5rem 0;
 }
+
+/* Leaflet popup shown when a pin is clicked -- a quick preview photo
+   right at the pin, separate from the full gallery in #detail-card. */
+.photomap-popup { display: flex; flex-direction: column; gap: 0.35rem; }
+
+.photomap-popup-img {
+  display: block;
+  max-width: 100%;
+  width: 220px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
