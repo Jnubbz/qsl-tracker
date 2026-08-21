@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ card['callsign'] }} -- QSL Photo Map{% endblock %}
+{% block content %}
+  <section class="card">
+    <div class="dashboard-top">
+      <h1>Edit {{ card['callsign'] }}</h1>
+      <a href="{{ url_for('admin_photomap_manage') }}">Back to all cards</a>
+    </div>
+
+    {% if images %}
+      <label>Current photo(s)</label>
+      <div class="card-thumbs">
+        {% for img in images %}
+          <label class="card-thumb">
+            <img src="{{ img['url'] }}" alt="{{ card['callsign'] }} QSL card">
+            <span><input type="checkbox" name="remove_image" value="{{ img['s3_key'] }}" form="edit-form"> Remove</span>
+          </label>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="flag-missing">No photo on file for this card yet -- add one below.</p>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('admin_photomap_edit', card_id=card['id']) }}"
+          enctype="multipart/form-data" id="edit-form">
+      <label for="images">Add photo(s)</label>
+      <input type="file" id="images" name="images" accept="image/*" multiple>
+
+      <div class="lookup-forms">
+        <div>
+          <label for="qso_date">QSO date (YYYYMMDD)</label>
+          <input type="text" id="qso_date" name="qso_date" value="{{ card['qso_date'] or '' }}" placeholder="20260615">
+        </div>
+        <div>
+          <label for="band">Band</label>
+          <input type="text" id="band" name="band" value="{{ card['band'] or '' }}" placeholder="40M">
+        </div>
+      </div>
+      <div class="lookup-forms">
+        <div>
+          <label for="mode">Mode</label>
+          <input type="text" id="mode" name="mode" value="{{ card['mode'] or '' }}" placeholder="SSB">
+        </div>
+        <div>
+          <label for="freq">Frequency (MHz)</label>
+          <input type="text" id="freq" name="freq" value="{{ card['freq'] or '' }}" placeholder="7.185">
+        </div>
+      </div>
+      <div class="lookup-forms">
+        <div>
+          <label for="rst_sent">RST sent</label>
+          <input type="text" id="rst_sent" name="rst_sent" value="{{ card['rst_sent'] or '' }}" placeholder="59">
+        </div>
+        <div>
+          <label for="rst_rcvd">RST received</label>
+          <input type="text" id="rst_rcvd" name="rst_rcvd" value="{{ card['rst_rcvd'] or '' }}" placeholder="59">
+        </div>
+      </div>
+
+      <label for="note">Note (optional)</label>
+      <input type="text" id="note" name="note" value="{{ card['note'] or '' }}" placeholder="e.g. Field Day 2026">
+
+      <button type="submit">Save changes</button>
+    </form>
+  </section>
+{% endblock %}

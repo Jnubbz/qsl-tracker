@@ -27,7 +27,7 @@ import photomap_store
 from adif import distinct_callsigns, parse_adif
 from mailer import send_qsl_request_email
 from qrz import QrzError, format_mailing_label, get_session_key, lookup_callsign, lookup_location
-from s3 import S3Error, get_object_bytes, upload_card_image
+from s3 import S3Error, delete_object, get_object_bytes, upload_card_image
 
 # Without this, mailer.py's logger.warning()/logger.exception() calls for
 # the QSL request email (see /request-qsl below) wouldn't reliably show
@@ -97,6 +97,28 @@ def qrz_key_or_none():
     return auth["qrz_key"] if auth else None
 
 
+def qrz_login_attempt(username: str, password: str) -> str | None:
+    """Shared by /login (the main site's per-visitor QRZ login) and
+    /admin/login's QRZ step (see below) so both handle a failed QRZ
+    login the same way. Flashes an error and returns None on failure;
+    on success, stores the session key (never the password) and
+    returns it."""
+    username = username.strip()
+    if not username or not password:
+        flash("Enter your QRZ XML subscriber username and password.", "error")
+        return None
+    try:
+        key = get_session_key(username, password)
+    except QrzError as exc:
+        flash(f"QRZ login failed: {exc}", "error")
+        return None
+    except Exception:
+        flash("Couldn't reach QRZ right now. Try again in a moment.", "error")
+        return None
+    db.save_auth(session["session_id"], key, username)
+    return key
+
+
 def admin_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
@@ -128,25 +150,11 @@ def index():
 
 @app.route("/login", methods=["POST"])
 def login():
-    username = request.form.get("qrz_username", "").strip()
-    password = request.form.get("qrz_password", "")
-    if not username or not password:
-        flash("Enter your QRZ XML subscriber username and password.", "error")
+    key = qrz_login_attempt(
+        request.form.get("qrz_username", ""), request.form.get("qrz_password", "")
+    )
+    if key is None:
         return redirect(url_for("index"))
-
-    try:
-        key = get_session_key(username, password)
-    except QrzError as exc:
-        flash(f"QRZ login failed: {exc}", "error")
-        return redirect(url_for("index"))
-    except Exception:
-        flash("Couldn't reach QRZ right now. Try again in a moment.", "error")
-        return redirect(url_for("index"))
-
-    # Only the short-lived session key is kept -- never the password --
-    # and it's stored server-side, keyed by the anonymous session id,
-    # rather than in the cookie itself.
-    db.save_auth(session["session_id"], key, username)
     flash("Logged in to QRZ.", "success")
     return redirect(url_for("dashboard"))
 
@@ -360,18 +368,42 @@ def request_qsl_thanks():
 
 @app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
-    if request.method == "POST":
+    """Two steps, QRZ first: the QSL Photo Map's upload flow needs a
+    QRZ session (to look up a new callsign's map location) as often as
+    it needs the admin password itself, and discovering that need
+    *mid-upload* -- after already getting past the password -- was the
+    original annoyance. So if there's no QRZ session yet, that's asked
+    for first; only once it's in place (or was already there from an
+    earlier /login) does the password step show. Both steps land back
+    on `next` when done, and a QRZ session already established via the
+    main site's /login skips the QRZ step here entirely."""
+    next_url = request.values.get("next") or url_for("admin_photomap_upload")
+
+    if request.method == "POST" and "qrz_username" in request.form:
+        key = qrz_login_attempt(
+            request.form.get("qrz_username", ""), request.form.get("qrz_password", "")
+        )
+        if key is None:
+            return render_template("admin_login.html", next=next_url, stage="qrz")
+        flash("Logged in to QRZ.", "success")
+        # Fall through to the password step below -- no redirect needed,
+        # qrz_key_or_none() will now see the session just saved.
+
+    elif request.method == "POST" and "password" in request.form:
         password = request.form.get("password", "")
-        next_url = request.form.get("next") or url_for("admin_photomap_upload")
         if not ADMIN_PASSWORD:
             flash("Admin login isn't configured yet (ADMIN_PASSWORD isn't set on the server).", "error")
-        elif secrets.compare_digest(password, ADMIN_PASSWORD):
-            session["is_admin"] = True
-            flash("Logged in.", "success")
-            return redirect(next_url)
-        else:
+            return render_template("admin_login.html", next=next_url, stage="password")
+        if not secrets.compare_digest(password, ADMIN_PASSWORD):
             flash("Wrong password.", "error")
-    return render_template("admin_login.html", next=request.args.get("next", ""))
+            return render_template("admin_login.html", next=next_url, stage="password")
+        session["is_admin"] = True
+        flash("Logged in.", "success")
+        return redirect(next_url)
+
+    if not qrz_key_or_none():
+        return render_template("admin_login.html", next=next_url, stage="qrz")
+    return render_template("admin_login.html", next=next_url, stage="password")
 
 
 @app.route("/admin/logout", methods=["POST"])
@@ -468,12 +500,10 @@ def admin_photomap_upload():
         if location is None:
             key = qrz_key_or_none()
             if not key:
-                flash(
-                    "Log in with your QRZ credentials first (top of the site) so "
-                    f"{callsign}'s location can be looked up.",
-                    "error",
+                flash(f"Log in with QRZ so {callsign}'s location can be looked up, then try again.", "error")
+                return redirect(
+                    url_for("admin_login", next=url_for("admin_photomap_upload", callsign=callsign))
                 )
-                return redirect(url_for("admin_photomap_upload", callsign=callsign))
             try:
                 loc = lookup_location(key, callsign)
             except QrzError as exc:
@@ -522,6 +552,115 @@ def admin_photomap_upload():
         callsign_prefill=request.args.get("callsign", ""),
         recent_cards=recent_cards,
     )
+
+
+@app.route("/admin/photomap/manage")
+@admin_required
+def admin_photomap_manage():
+    """Every uploaded card, callsign by callsign, with Edit/Delete
+    actions -- for fixing entries that went up without a photo or
+    without QSO info (both are optional at upload time; this is where
+    that gets cleaned up after the fact)."""
+    try:
+        cards = photomap_store.list_all_photo_cards()
+    except S3Error as exc:
+        flash(s3_config_hint(exc), "error")
+        cards = []
+    return render_template("admin_photomap_manage.html", cards=cards)
+
+
+@app.route("/admin/photomap/edit/<int:card_id>", methods=["GET", "POST"])
+@admin_required
+def admin_photomap_edit(card_id):
+    try:
+        card = photomap_store.get_photo_card(card_id)
+    except S3Error as exc:
+        flash(s3_config_hint(exc), "error")
+        return redirect(url_for("admin_photomap_manage"))
+
+    if card is None:
+        flash("That card no longer exists.", "error")
+        return redirect(url_for("admin_photomap_manage"))
+
+    if request.method == "POST":
+        qso_date = request.form.get("qso_date", "").strip()
+        band = request.form.get("band", "").strip().upper()
+        mode = request.form.get("mode", "").strip().upper()
+        freq = request.form.get("freq", "").strip()
+        rst_sent = request.form.get("rst_sent", "").strip()
+        rst_rcvd = request.form.get("rst_rcvd", "").strip()
+        note = request.form.get("note", "").strip()
+        try:
+            photomap_store.update_photo_card(card_id, qso_date, band, mode, freq, rst_sent, rst_rcvd, note)
+        except S3Error as exc:
+            flash(s3_config_hint(exc), "error")
+            return redirect(url_for("admin_photomap_edit", card_id=card_id))
+
+        removed = 0
+        for s3_key in request.form.getlist("remove_image"):
+            try:
+                photomap_store.remove_photo_card_image(card_id, s3_key)
+                delete_object(s3_key)
+                removed += 1
+            except S3Error:
+                # The card's metadata is already updated even if the S3
+                # delete itself fails -- a leftover orphaned object in
+                # the bucket isn't worth blocking the save over.
+                pass
+
+        added, failed = 0, 0
+        for f in request.files.getlist("images"):
+            if not f or not f.filename:
+                continue
+            try:
+                key = upload_card_image(f, card["callsign"])
+                photomap_store.add_photo_card_image(card_id, key)
+                added += 1
+            except S3Error:
+                failed += 1
+
+        message = f"Updated {card['callsign']}."
+        if added:
+            message += f" Added {added} photo(s)."
+        if removed:
+            message += f" Removed {removed} photo(s)."
+        if failed:
+            message += f" {failed} new image(s) failed to upload."
+        flash(message, "success")
+        return redirect(url_for("admin_photomap_edit", card_id=card_id))
+
+    try:
+        images = photomap_store.get_images_for_card(card_id)
+    except S3Error as exc:
+        flash(s3_config_hint(exc), "error")
+        images = []
+    image_entries = [
+        {"s3_key": img["s3_key"], "url": url_for("photomap_image", key=img["s3_key"])} for img in images
+    ]
+    return render_template("admin_photomap_edit.html", card=card, images=image_entries)
+
+
+@app.route("/admin/photomap/delete/<int:card_id>", methods=["POST"])
+@admin_required
+def admin_photomap_delete(card_id):
+    try:
+        removed = photomap_store.delete_photo_card(card_id)
+    except S3Error as exc:
+        flash(s3_config_hint(exc), "error")
+        return redirect(url_for("admin_photomap_manage"))
+
+    if removed is None:
+        flash("That card was already gone.", "error")
+        return redirect(url_for("admin_photomap_manage"))
+
+    for s3_key in removed.get("images", []):
+        try:
+            delete_object(s3_key)
+        except S3Error:
+            pass  # metadata's already gone; a leftover S3 object isn't worth blocking on
+
+    flash(f"Deleted {removed['callsign']}'s card.", "success")
+    return redirect(url_for("admin_photomap_manage"))
 
 
 @app.route("/photomap")

@@ -174,6 +174,73 @@ def list_recent_photo_cards(limit: int = 10) -> list[dict]:
     return cards[:limit]
 
 
+def list_all_photo_cards() -> list[dict]:
+    """Every photo card, callsign then most-recent-first -- the admin
+    "manage cards" page's full list (list_recent_photo_cards above only
+    shows a handful, for the upload page's quick-glance table)."""
+    data = _load()
+    return sorted(data["photo_cards"], key=lambda c: (c["callsign"], -c["created_at"]))
+
+
+def get_photo_card(card_id: int) -> dict | None:
+    data = _load()
+    for card in data["photo_cards"]:
+        if card["id"] == card_id:
+            return card
+    return None
+
+
+def update_photo_card(
+    card_id: int, qso_date: str, band: str, mode: str, freq: str,
+    rst_sent: str, rst_rcvd: str, note: str,
+) -> bool:
+    """Overwrites a card's QSO fields in place -- for fixing entries
+    that were uploaded without QSO info (or with the wrong info).
+    Returns False if no such card exists (nothing to do)."""
+    data = _load()
+    for card in data["photo_cards"]:
+        if card["id"] == card_id:
+            card["qso_date"] = qso_date
+            card["band"] = band
+            card["mode"] = mode
+            card["freq"] = freq
+            card["rst_sent"] = rst_sent
+            card["rst_rcvd"] = rst_rcvd
+            card["note"] = note
+            _save(data)
+            return True
+    return False
+
+
+def remove_photo_card_image(card_id: int, s3_key: str) -> bool:
+    """Detaches one image from a card (e.g. a bad scan). Doesn't touch
+    the S3 object itself -- see s3.delete_object(), called separately
+    by the route so a failed S3 delete doesn't block the metadata
+    update. Returns False if the card or that image reference wasn't
+    found."""
+    data = _load()
+    for card in data["photo_cards"]:
+        if card["id"] == card_id and s3_key in card["images"]:
+            card["images"].remove(s3_key)
+            _save(data)
+            return True
+    return False
+
+
+def delete_photo_card(card_id: int) -> dict | None:
+    """Removes a card entirely -- for entries that were uploaded
+    without a photo or QSO info and are easier to redo than fix.
+    Returns the removed card (so the caller can clean up its S3 image
+    objects) or None if no such card exists."""
+    data = _load()
+    for i, card in enumerate(data["photo_cards"]):
+        if card["id"] == card_id:
+            removed = data["photo_cards"].pop(i)
+            _save(data)
+            return removed
+    return None
+
+
 # ---------------------------------------------------------------------
 # Josh's own logged QSOs (for auto-fill), imported from ADIF
 # ---------------------------------------------------------------------

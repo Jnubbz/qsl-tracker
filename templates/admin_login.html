@@ -2,13 +2,31 @@
 {% block title %}Admin log in -- QSL Tracker{% endblock %}
 {% block content %}
   <section class="card">
-    <h1>Admin log in</h1>
-    <p class="muted">This gates the QSL Photo Map's upload tools -- not the public site.</p>
-    <form method="post" action="{{ url_for('admin_login') }}">
-      <input type="hidden" name="next" value="{{ next }}">
-      <label for="password">Password</label>
-      <input type="password" id="password" name="password" autocomplete="current-password" required autofocus>
-      <button type="submit">Log in</button>
-    </form>
+    {% if stage == "qrz" %}
+      <h1>Log in with QRZ</h1>
+      <p class="muted">
+        First step: the QSL Photo Map's upload tools need a QRZ session
+        to look up a new callsign's map location. Log in once here and
+        you won't be asked again this session (or if you're already
+        logged in to QRZ elsewhere on the site).
+      </p>
+      <form method="post" action="{{ url_for('admin_login') }}">
+        <input type="hidden" name="next" value="{{ next }}">
+        <label for="qrz_username">QRZ username</label>
+        <input type="text" id="qrz_username" name="qrz_username" autocomplete="username" required autofocus>
+        <label for="qrz_password">QRZ password</label>
+        <input type="password" id="qrz_password" name="qrz_password" autocomplete="current-password" required>
+        <button type="submit">Log in to QRZ</button>
+      </form>
+    {% else %}
+      <h1>Admin log in</h1>
+      <p class="muted">This gates the QSL Photo Map's upload tools -- not the public site.</p>
+      <form method="post" action="{{ url_for('admin_login') }}">
+        <input type="hidden" name="next" value="{{ next }}">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" autocomplete="current-password" required autofocus>
+        <button type="submit">Log in</button>
+      </form>
+    {% endif %}
   </section>
 {% endblock %}

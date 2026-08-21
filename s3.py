@@ -103,6 +103,18 @@ def presigned_url(key: str, expires_in: int = 3600) -> str:
         raise S3Error(str(exc)) from exc
 
 
+def delete_object(key: str) -> None:
+    """Delete a single object -- used when the admin edit page removes
+    a photo from a card, or deletes a card outright, so the underlying
+    S3 file doesn't just sit there orphaned."""
+    if not BUCKET:
+        raise S3Error("S3_BUCKET isn't configured.")
+    try:
+        _get_client().delete_object(Bucket=BUCKET, Key=key)
+    except (ClientError, BotoCoreError) as exc:
+        raise S3Error(str(exc)) from exc
+
+
 def get_json(key: str):
     """Fetch and parse a JSON object from the bucket, or None if it
     doesn't exist yet (a fresh bucket, or first run). Used by

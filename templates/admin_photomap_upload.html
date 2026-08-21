@@ -10,9 +10,12 @@
     </div>
     <p class="muted">
       <a href="{{ url_for('admin_import_adif') }}">Import/refresh your ADIF log</a>
-      to enable QSO auto-fill below. A callsign's map location comes from QRZ --
-      if it hasn't been looked up before, log in with your QRZ credentials on the
-      <a href="{{ url_for('index') }}">home page</a> first.
+      to enable QSO auto-fill below, or
+      <a href="{{ url_for('admin_photomap_manage') }}">manage/edit already-uploaded cards</a>
+      -- add a missing photo, fill in missing QSO info, or fix a mistake.
+      A callsign's map location comes from QRZ; if it hasn't been looked up
+      before and your QRZ session has lapsed, you'll be sent to log in again
+      before the save goes through.
     </p>
 
     <form method="post" action="{{ url_for('admin_photomap_upload') }}" enctype="multipart/form-data" id="upload-form">
@@ -67,7 +70,7 @@
       <h1>Recently uploaded</h1>
       <table class="contacts">
         <thead>
-          <tr><th>Callsign</th><th>Date</th><th>Band</th><th>Mode</th><th>Note</th></tr>
+          <tr><th>Callsign</th><th>Date</th><th>Band</th><th>Mode</th><th>Note</th><th></th></tr>
         </thead>
         <tbody>
           {% for c in recent_cards %}
@@ -77,6 +80,7 @@
               <td>{{ c['band'] or '-' }}</td>
               <td>{{ c['mode'] or '-' }}</td>
               <td>{{ c['note'] or '-' }}</td>
+              <td><a href="{{ url_for('admin_photomap_edit', card_id=c['id']) }}">Edit</a></td>
             </tr>
           {% endfor %}
         </tbody>
