@@ -20,9 +20,22 @@ credentials ever go stale later.
 """
 from __future__ import annotations
 
+import logging
 import os
 import smtplib
+import sys
 from email.message import EmailMessage
+
+logger = logging.getLogger(__name__)
+
+
+def _log(message: str) -> None:
+    """Log via both the `logging` module and a plain, flushed print to
+    stderr. Belt-and-suspenders: if something about how gunicorn/Render
+    wires up Python's logging module is swallowing our handler output,
+    a direct flushed print to the same stream still gets through."""
+    logger.warning(message)
+    print(message, file=sys.stderr, flush=True)
 
 
 def _clean(text) -> str:
@@ -39,11 +52,23 @@ def send_qsl_request_email(callsign: str, note: str, contact_email: str) -> bool
     (missing config) or failed outright. Never raises -- a broken mail
     setup should never break the visitor-facing form.
     """
+    print("QSL request email: send_qsl_request_email() called", file=sys.stderr, flush=True)
+
     gmail_address = os.environ.get("GMAIL_ADDRESS")
     gmail_app_password = os.environ.get("GMAIL_APP_PASSWORD")
     notify_email = os.environ.get("NOTIFY_EMAIL") or gmail_address
 
     if not gmail_address or not gmail_app_password or not notify_email:
+        missing = [
+            name
+            for name, val in [
+                ("GMAIL_ADDRESS", gmail_address),
+                ("GMAIL_APP_PASSWORD", gmail_app_password),
+                ("NOTIFY_EMAIL/GMAIL_ADDRESS", notify_email),
+            ]
+            if not val
+        ]
+        _log(f"QSL request email skipped -- missing env var(s): {', '.join(missing)}")
         return False
 
     callsign = _clean(callsign)[:20]
@@ -66,10 +91,15 @@ def send_qsl_request_email(callsign: str, note: str, contact_email: str) -> bool
     body_lines.append('Sent from the "Request a QSL Card" form on kn0ble.com.')
     msg.set_content("\n".join(body_lines))
 
+    print(f"QSL request email: attempting SMTP send for callsign {callsign or '(none)'}...",
+          file=sys.stderr, flush=True)
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as smtp:
             smtp.login(gmail_address, gmail_app_password)
             smtp.send_message(msg)
+        _log(f"QSL request email sent for callsign {callsign or '(none)'}")
         return True
-    except Exception:
+    except Exception as exc:
+        _log(f"QSL request email FAILED for callsign {callsign or '(none)'}: {exc!r}")
+        logger.exception("Failed to send QSL request notification email")
         return False
