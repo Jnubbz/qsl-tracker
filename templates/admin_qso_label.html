@@ -46,7 +46,7 @@
       <h1>Most recent QSOs your API key can see</h1>
       {% if recent %}
         <p class="muted">
-          Last 30 days, any callsign &mdash; a quick sanity check on what QRZ's
+          Last 3 days, any callsign &mdash; a quick sanity check on what QRZ's
           Logbook API is actually returning right now. If today's QSO shows up
           here under a slightly different call (a portable suffix, for
           example), select it directly below.
@@ -103,7 +103,7 @@
         {% endfor %}
       {% endif %}
       {% if raw_recent %}
-        <p><strong>Last-30-days (no callsign filter) request:</strong></p>
+        <p><strong>Last-3-days (no callsign filter) request:</strong></p>
         <pre style="white-space: pre-wrap; word-break: break-word; background: rgba(0,0,0,0.25); padding: 0.75rem; border-radius: 6px;">{{ raw_recent }}</pre>
       {% endif %}
     </section>

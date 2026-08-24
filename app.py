@@ -565,12 +565,16 @@ def _fetch_qso_matches(callsign: str) -> list[dict]:
     return _rows_from_adif(fetch_logged_qsos(QRZ_LOGBOOK_API_KEY, callsign))
 
 
-def _fetch_recent_qsos(days: int = 30, max_results: int = 25) -> list[dict]:
+def _fetch_recent_qsos(days: int = 3, max_results: int = 100) -> list[dict]:
     """Diagnostic fallback for admin_qso_label(): the last `days` days
     of QSOs under ANY callsign, regardless of the CALL: filter -- see
-    qrz.fetch_recent_qsos() for why. Raises QrzLogbookError the same way
-    _fetch_qso_matches() does; callers should decide whether to surface
-    that or just quietly skip showing the diagnostic list."""
+    qrz.fetch_recent_qsos() for why (short window / generous cap, not
+    the original 30 days / 25 results -- a real production response
+    proved QRZ returns BETWEEN matches oldest-of-the-range first, so a
+    wide window silently truncated before ever reaching "today"). Raises
+    QrzLogbookError the same way _fetch_qso_matches() does; callers
+    should decide whether to surface that or just quietly skip showing
+    the diagnostic list."""
     return _rows_from_adif(fetch_recent_qsos(QRZ_LOGBOOK_API_KEY, days, max_results))
 
 
@@ -687,11 +691,17 @@ def admin_qso_label():
             # Diagnostic -- surface exactly what happened (empty-but-OK vs.
             # an outright failure) rather than just logging it server-side,
             # since Josh can't see Render's logs from the page itself.
+            # Uses a short (3-day) window, not a long one -- see
+            # _fetch_recent_qsos()'s docstring: a real production response
+            # proved QRZ returns BETWEEN matches oldest-of-the-range
+            # first, so on any active logging day a wide window truncates
+            # at MAX before ever reaching "today", making the diagnostic
+            # silently show only stale data from the start of the window.
             try:
                 recent = _fetch_recent_qsos()
                 if not recent:
                     recent_note = (
-                        "Checked: your API key shows zero QSOs logged in the last 30 days, "
+                        "Checked: your API key shows zero QSOs logged in the last 3 days, "
                         "under ANY callsign. If that doesn't match what you see on QRZ's own "
                         "logbook page, this API key is most likely scoped to a different "
                         "logbook/callsign than the one you're viewing on qrz.com -- worth "

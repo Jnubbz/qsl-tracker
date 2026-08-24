@@ -336,7 +336,7 @@ def call_option(callsign: str, max_results: int = 250) -> str:
     return f"CALL:{callsign},MAX:{max_results}"
 
 
-def fetch_recent_qsos(api_key: str, days: int = 30, max_results: int = 25) -> str:
+def fetch_recent_qsos(api_key: str, days: int = 3, max_results: int = 100) -> str:
     """FETCH the most recent QSOs logged under ANY callsign in the last
     `days` days -- no CALL: filter at all. This is a diagnostic used by
     admin_qso_label() when a CALL-filtered fetch_logged_qsos() comes up
@@ -351,14 +351,26 @@ def fetch_recent_qsos(api_key: str, days: int = 30, max_results: int = 25) -> st
     as ALL *not* being combinable with MAX. BETWEEN is an ordinary scope
     filter with no such restriction, so BETWEEN+MAX avoids that
     ambiguity entirely while still capping the result size.
+
+    `days`/`max_results` default to a short window (3 days) and a
+    generous cap (100) rather than the original 30 days / 25 results --
+    a real production response confirmed QRZ returns BETWEEN matches in
+    ascending date order (oldest of the range first), so a 30-day
+    window on an active logging day silently truncated at MAX before
+    reaching anything from "today" at all. This diagnostic only ever
+    needs to answer "does the API see what I logged recently", so a
+    short window that can't be outrun by MAX is what actually makes it
+    diagnostic rather than a fixed, ever-stale slice of a month ago.
     """
     return _fetch(api_key, recent_option(days, max_results))
 
 
-def recent_option(days: int = 30, max_results: int = 25) -> str:
+def recent_option(days: int = 3, max_results: int = 100) -> str:
     """The exact OPTION string fetch_recent_qsos() sends -- see
     call_option() above for why this is exposed rather than
-    duplicated."""
+    duplicated. See fetch_recent_qsos() above for why the defaults are
+    a short window (3 days) with a generous cap (100), not the original
+    30 days / 25 results."""
     end = date.today()
     start = end - timedelta(days=days)
     return f"BETWEEN:{start.isoformat()}+{end.isoformat()},MAX:{max_results}"
