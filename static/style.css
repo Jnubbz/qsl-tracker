@@ -287,3 +287,50 @@ table.contacts tr.direct { background: rgba(47, 157, 111, 0.12); }
   border-radius: 6px;
   border: 1px solid var(--border);
 }
+
+/* Admin: print QSL label */
+.button-link {
+  display: inline-block;
+  align-self: flex-start;
+  background: var(--accent);
+  color: var(--accent-ink);
+  border: none;
+  border-radius: 6px;
+  padding: 0.55rem 1.1rem;
+  font-size: 0.95rem;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.button-link:hover { opacity: 0.9; }
+
+.label-preview {
+  width: 4in;
+  max-width: 100%;
+  aspect-ratio: 2 / 1;
+  background: #ffffff;
+  color: #111111;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  padding: 0.25in;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+
+.label-preview p {
+  margin: 0.12in 0 0;
+  line-height: 1.2;
+}
+
+.label-preview p:first-child { margin-top: 0; }
+
+.label-preview-header {
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.label-preview-line {
+  font-size: 0.9rem;
+}

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Print QSL Label{% endblock %}
+{% block content %}
+  <section class="card">
+    <div class="dashboard-top">
+      <h1>Print a QSL mailing label</h1>
+      <form method="post" action="{{ url_for('admin_logout') }}">
+        <button type="submit" class="link-button">Log out (admin)</button>
+      </form>
+    </div>
+    <p class="muted">
+      Look up a callsign against QRZ and, if they have a mailing address on
+      file for a direct card, get a print-ready PDF sized for one cell of an
+      Avery 5163 / 8163 / 18163 sheet (2"&times;4", 10 per page, 2 columns
+      &times; 5 rows). Only the position you pick gets filled in, so you can
+      keep using a partially-used sheet.
+    </p>
+
+    <form method="get" action="{{ url_for('admin_label') }}" id="label-form">
+      <label for="callsign">Callsign</label>
+      <input type="text" id="callsign" name="callsign" value="{{ callsign }}" placeholder="e.g. W1AW" required autofocus>
+
+      <label for="position">Sheet position (1&ndash;{{ label_count }}, left-to-right, top-to-bottom)</label>
+      <select id="position" name="position">
+        {% for i in range(1, label_count + 1) %}
+          <option value="{{ i }}" {% if i == position %}selected{% endif %}>{{ i }}</option>
+        {% endfor %}
+      </select>
+
+      <button type="submit">Look up</button>
+    </form>
+  </section>
+
+  {% if error %}
+    <section class="card">
+      <p class="flag-missing">{{ error }}</p>
+    </section>
+  {% endif %}
+
+  {% if record %}
+    <section class="card">
+      <h1>Preview</h1>
+      <div class="label-preview">
+        {% for text, font, size in label_lines %}
+          <p class="{{ 'label-preview-header' if loop.first else 'label-preview-line' }}">{{ text }}</p>
+        {% endfor %}
+      </div>
+      <p class="muted" style="margin-top: 1rem;">
+        Position {{ position }} of {{ label_count }} on the Avery 5163/8163/18163
+        layout. Sourced from QRZ just now &mdash; not saved anywhere in QSL Tracker.
+      </p>
+      <a class="button-link"
+         href="{{ url_for('admin_label_pdf', callsign=record.callsign, position=position) }}"
+         target="_blank" rel="noopener">Download PDF label</a>
+    </section>
+  {% endif %}
+{% endblock %}

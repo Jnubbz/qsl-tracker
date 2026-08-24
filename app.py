@@ -23,6 +23,7 @@ from functools import wraps
 from flask import Flask, Response, abort, flash, redirect, render_template, request, session, url_for
 
 import db
+import labels
 import photomap_store
 from adif import distinct_callsigns, parse_adif
 from mailer import send_qsl_request_email
@@ -411,6 +412,93 @@ def admin_logout():
     session.pop("is_admin", None)
     flash("Logged out.", "success")
     return redirect(url_for("index"))
+
+
+@app.route("/admin/label")
+@admin_required
+def admin_label():
+    """Ad-hoc QSL mailing-label lookup. Looks up one callsign against QRZ
+    (reusing the same lookup_callsign() address-eligibility gating as the
+    main dashboard -- see qrz.py) and, if there's an address on file for
+    a direct card, shows an on-screen preview plus a link to a print-ready
+    PDF (see /admin/label/pdf and labels.py) sized for one cell of an
+    Avery 5163/8163/18163 2"x4" shipping-label sheet."""
+    callsign = request.args.get("callsign", "").strip().upper()
+    position = labels.clamp_position(_parse_int(request.args.get("position"), default=1))
+    record = None
+    error = None
+
+    if callsign:
+        key = qrz_key_or_none()
+        if not key:
+            return redirect(
+                url_for(
+                    "admin_login",
+                    next=url_for("admin_label", callsign=callsign, position=position),
+                )
+            )
+        try:
+            record = lookup_callsign(key, callsign)
+            if not record.accepts_direct:
+                error = (
+                    f"No mailing address on file for {record.callsign} that they've "
+                    "made available for a direct card -- either QRZ has no address, "
+                    "they've opted out of direct QSLs, or cards should route through "
+                    "a QSL manager instead."
+                )
+                record = None
+        except QrzError as exc:
+            error = f"QRZ lookup failed: {exc}"
+        except Exception:
+            error = "Couldn't reach QRZ right now. Try again in a moment."
+
+    return render_template(
+        "admin_label.html",
+        callsign=callsign,
+        position=position,
+        label_count=labels.LABEL_COUNT,
+        record=record,
+        label_lines=labels.label_lines(record) if record else [],
+        error=error,
+    )
+
+
+@app.route("/admin/label/pdf")
+@admin_required
+def admin_label_pdf():
+    callsign = request.args.get("callsign", "").strip().upper()
+    position = labels.clamp_position(_parse_int(request.args.get("position"), default=1))
+    if not callsign:
+        abort(400)
+
+    key = qrz_key_or_none()
+    if not key:
+        abort(401)
+
+    try:
+        record = lookup_callsign(key, callsign)
+    except QrzError:
+        abort(404)
+    except Exception:
+        abort(502)
+
+    if not record.accepts_direct:
+        abort(404)
+
+    pdf_bytes = labels.generate_avery_5163_pdf(record, position)
+    filename = f"qsl-label-{record.callsign}.pdf"
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+def _parse_int(raw: str | None, default: int) -> int:
+    try:
+        return int(raw) if raw is not None else default
+    except ValueError:
+        return default
 
 
 @app.route("/admin/photomap/import-adif", methods=["GET", "POST"])
