@@ -9,12 +9,14 @@
       </form>
     </div>
     <p class="muted">
-      Pulls live from your QRZ Logbook (never an imported file) so you get
-      callsign, date/time in UTC, band/mode/freq, and RST sent/received on a
-      print-ready label sized for one cell of an Avery 5163 / 8163 / 18163
-      sheet (2"&times;4", 10 per page) &mdash; meant to be stuck onto the blank
-      2"&times;4" spot on the card itself instead of hand-written. A QSO
-      missing here just means it isn't in your QRZ Logbook yet. Looking for a
+      Pulls from your imported ADIF log (see
+      <a href="{{ url_for('admin_import_adif') }}">import/refresh your log</a>
+      if a recent QSO is missing) so you get callsign, date/time in UTC,
+      band/mode/freq, and RST sent/received on a print-ready label sized
+      for one cell of an Avery 5163 / 8163 / 18163 sheet (2"&times;4", 10
+      per page) &mdash; meant to be stuck onto the blank 2"&times;4" spot
+      on the card itself instead of hand-written. A QSO missing here just
+      means it isn't in your imported log yet. Looking for a
       mailing-address label instead?
       <a href="{{ url_for('admin_label') }}">Print a QSL mailing label</a>.
     </p>
@@ -29,93 +31,53 @@
   {% if error %}
     <section class="card">
       <p class="flag-missing">{{ error }}</p>
-      {% if timing_note %}
-        <p class="muted">{{ timing_note }}</p>
-        <p>
-          <a class="button-link" href="{{ url_for('admin_qso_label', callsign=callsign, debug=1 if debug else None) }}">Search again</a>
-          &mdash; same callsign, no retyping needed. QRZ's recovery time
-          varies, so a second (or third) try a few seconds apart often
-          succeeds even when this page's own built-in retries didn't.
-        </p>
-      {% endif %}
     </section>
   {% endif %}
 
-  {% if recent or recent_note %}
+  {% if batch %}
     <section class="card">
-      <h1>Most recent QSOs your API key can see</h1>
-      {% if recent %}
-        <p class="muted">
-          Last 3 days, any callsign &mdash; a quick sanity check on what QRZ's
-          Logbook API is actually returning right now. If today's QSO shows up
-          here under a slightly different call (a portable suffix, for
-          example), select it directly below.
-        </p>
-        <table class="contacts">
-          <thead>
-            <tr><th>Callsign</th><th>Date</th><th>Time (UTC)</th><th>Band / Mode</th><th>Freq</th><th></th></tr>
-          </thead>
-          <tbody>
-            {% for r in recent %}
-              <tr>
-                <td>{{ r['callsign'] }}</td>
-                <td>{{ r['qso_date'] or '-' }}</td>
-                <td>{{ r['time_on'] or '-' }}</td>
-                <td>{{ [r['band'], r['mode']] | select | join(' / ') or '-' }}</td>
-                <td>{{ r['freq'] or '-' }}</td>
-                <td><a href="{{ url_for('admin_qso_label', callsign=r['callsign'], qso_key=r['key'], position=position) }}">Select</a></td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      {% endif %}
-      {% if recent_note %}
-        <p class="flag-missing">{{ recent_note }}</p>
-      {% endif %}
-      {% if not debug %}
-        <p class="muted">
-          <a href="{{ url_for('admin_qso_label', callsign=callsign, debug=1) }}">Show the raw, unparsed QRZ API response (debug)</a>
-          &mdash; if you're confident your API key/logbook setup is correct, this shows exactly what QRZ sent back instead of asking you to trust the summary above.
-        </p>
-      {% endif %}
-    </section>
-  {% endif %}
-
-  {% if debug and (raw_call or raw_recent) %}
-    <section class="card">
-      <h1>Raw QRZ API responses (debug)</h1>
+      <h1>Batch ({{ batch | length }} of {{ label_count }})</h1>
       <p class="muted">
-        Completely unparsed -- exactly what QRZ's Logbook API sent back for
-        each request, before any of this app's own RESULT/ADIF
-        interpretation.
+        Everything below prints together on one sheet, each at its own
+        position &mdash; nothing else on the sheet is touched.
       </p>
-      {% if raw_call %}
-        <p><strong>CALL:{{ callsign }} request, fired repeatedly ~1.5s apart</strong>
-          &mdash; each one tagged with its elapsed time since this page
-          load started (includes the primary search and its retries, so
-          these times are the real "how long until QRZ answers
-          correctly" picture). Watch for the first attempt where
-          RESULT/COUNT flips from empty to a real match -- that's the
-          number worth sizing the real retry window to.</p>
-        {% for ts, text in raw_call %}
-          <p class="muted">Attempt {{ loop.index }} (t=+{{ ts }}s since page load):</p>
-          <pre style="white-space: pre-wrap; word-break: break-word; background: rgba(0,0,0,0.25); padding: 0.75rem; border-radius: 6px;">{{ text }}</pre>
-        {% endfor %}
-      {% endif %}
-      {% if raw_recent %}
-        <p><strong>Last-3-days (no callsign filter) request:</strong></p>
-        <pre style="white-space: pre-wrap; word-break: break-word; background: rgba(0,0,0,0.25); padding: 0.75rem; border-radius: 6px;">{{ raw_recent }}</pre>
-      {% endif %}
+      <table class="contacts">
+        <thead>
+          <tr><th>Position</th><th>Callsign</th><th>Date</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for b in batch | sort(attribute='position') %}
+            <tr>
+              <td>{{ b.position }}</td>
+              <td>{{ b.callsign }}</td>
+              <td>{{ b.qso_date or '-' }}</td>
+              <td>
+                <form method="post" action="{{ url_for('admin_qso_label_batch_remove') }}" style="display: inline;">
+                  <input type="hidden" name="position" value="{{ b.position }}">
+                  <button type="submit" class="link-button">Remove</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p style="margin-top: 1rem;">
+        <a class="button-link" href="{{ url_for('admin_qso_label_batch_pdf') }}" target="_blank" rel="noopener">Download batch PDF ({{ batch | length }} label{{ 's' if batch | length != 1 else '' }})</a>
+        &nbsp;
+        <form method="post" action="{{ url_for('admin_qso_label_batch_clear') }}" style="display: inline;">
+          <button type="submit" class="link-button">Clear batch</button>
+        </form>
+      </p>
     </section>
   {% endif %}
 
   {% if matches %}
     <section class="card">
       <h1>{{ matches | length }} logged QSO{{ 's' if matches | length != 1 else '' }} with {{ callsign }}</h1>
-      <p class="muted">Pick the one to print.</p>
+      <p class="muted">Pick one to preview and print, or add it straight to the batch above.</p>
       <table class="contacts">
         <thead>
-          <tr><th>Date</th><th>Time (UTC)</th><th>Band / Mode</th><th>Freq</th><th>RST S/R</th><th></th></tr>
+          <tr><th>Date</th><th>Time (UTC)</th><th>Band / Mode</th><th>Freq</th><th>RST S/R</th><th></th><th></th></tr>
         </thead>
         <tbody>
           {% for m in matches %}
@@ -125,7 +87,24 @@
               <td>{{ [m['band'], m['mode']] | select | join(' / ') or '-' }}</td>
               <td>{{ m['freq'] or '-' }}</td>
               <td>{{ m['rst_sent'] or '-' }} / {{ m['rst_rcvd'] or '-' }}</td>
-              <td><a href="{{ url_for('admin_qso_label', callsign=callsign, qso_key=m['key'], position=position) }}">Select</a></td>
+              <td><a href="{{ url_for('admin_qso_label', callsign=callsign, qso_key=m['id'], position=position) }}">Select</a></td>
+              <td>
+                {% if batch_full %}
+                  <span class="muted">Batch full</span>
+                {% else %}
+                  <form method="post" action="{{ url_for('admin_qso_label_batch_add') }}" style="display: inline;">
+                    <input type="hidden" name="qso_id" value="{{ m['id'] }}">
+                    <input type="hidden" name="callsign" value="{{ callsign }}">
+                    <label class="visually-hidden" for="pos-{{ m['id'] }}">Position</label>
+                    <select id="pos-{{ m['id'] }}" name="position">
+                      {% for i in range(1, label_count + 1) %}
+                        <option value="{{ i }}" {% if i == next_batch_position %}selected{% endif %}>{{ i }}</option>
+                      {% endfor %}
+                    </select>
+                    <button type="submit">Add to batch</button>
+                  </form>
+                {% endif %}
+              </td>
             </tr>
           {% endfor %}
         </tbody>
@@ -144,7 +123,7 @@
 
       <form method="get" action="{{ url_for('admin_qso_label') }}" style="margin-top: 1rem;">
         <input type="hidden" name="callsign" value="{{ callsign }}">
-        <input type="hidden" name="qso_key" value="{{ qso['key'] }}">
+        <input type="hidden" name="qso_key" value="{{ qso['id'] }}">
         <label for="position">Sheet position (1&ndash;{{ label_count }}, left-to-right, top-to-bottom)</label>
         <select id="position" name="position">
           {% for i in range(1, label_count + 1) %}
@@ -158,10 +137,24 @@
         Position {{ position }} of {{ label_count }} on the Avery 5163/8163/18163 layout.
       </p>
       <a class="button-link"
-         href="{{ url_for('admin_qso_label_pdf', callsign=callsign, qso_key=qso['key'], position=position) }}"
+         href="{{ url_for('admin_qso_label_pdf', qso_key=qso['id'], position=position) }}"
          target="_blank" rel="noopener">Download PDF label</a>
       &nbsp;
       <a href="{{ url_for('admin_qso_label', callsign=callsign) }}">Pick a different QSO with {{ callsign }}</a>
+
+      {% if not batch_full %}
+        <form method="post" action="{{ url_for('admin_qso_label_batch_add') }}" style="margin-top: 1rem;">
+          <input type="hidden" name="qso_id" value="{{ qso['id'] }}">
+          <input type="hidden" name="callsign" value="{{ callsign }}">
+          <label for="batch-position">Or add this one to the batch at position</label>
+          <select id="batch-position" name="position">
+            {% for i in range(1, label_count + 1) %}
+              <option value="{{ i }}" {% if i == next_batch_position %}selected{% endif %}>{{ i }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit">Add to batch</button>
+        </form>
+      {% endif %}
     </section>
   {% endif %}
 {% endblock %}

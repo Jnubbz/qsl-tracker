@@ -29,16 +29,10 @@ from adif import distinct_callsigns, parse_adif
 from mailer import send_qsl_request_email
 from qrz import (
     QrzError,
-    QrzLogbookError,
-    call_option,
-    fetch_logged_qsos,
-    fetch_raw,
-    fetch_recent_qsos,
     format_mailing_label,
     get_session_key,
     lookup_callsign,
     lookup_location,
-    recent_option,
 )
 from s3 import S3Error, delete_object, get_object_bytes, upload_card_image
 
@@ -95,8 +89,18 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 # The QRZ Logbook API's own per-logbook access key (from Josh's QRZ
 # account: Logbook -> Settings -> API) -- a completely different secret
 # from the QRZ username/password the admin-login/dashboard flows use.
-# Powers the QSO-label page's live fetch straight from Josh's QRZ
-# Logbook -- see qrz.fetch_logged_qsos() and admin_qso_label() below.
+# CURRENTLY UNUSED (2026-08-24): the QSO-label page briefly fetched
+# live from this API (see qrz.py's fetch_logged_qsos()/fetch_recent_qsos()/
+# fetch_raw(), all still present and untouched), but QRZ's own CALL:
+# filter turned out to be broken account-wide that day (confirmed
+# across multiple callsigns of different ages, with BETWEEN: still
+# working fine) -- see qsl-tracker-status.md in the project docs for
+# the full investigation. Reverted to the ADIF-imported log
+# (photomap_store.find_my_qsos()/get_my_qso()) as the QSO-label data
+# source in the meantime. This env var and qrz.py's Logbook API client
+# are left in place, ready to be wired back into admin_qso_label()
+# below whenever that's revisited -- nothing here needs to be rebuilt
+# from scratch, just re-plugged in.
 QRZ_LOGBOOK_API_KEY = os.environ.get("QRZ_LOGBOOK_API_KEY", "")
 
 
@@ -441,7 +445,13 @@ def admin_label():
     main dashboard -- see qrz.py) and, if there's an address on file for
     a direct card, shows an on-screen preview plus a link to a print-ready
     PDF (see /admin/label/pdf and labels.py) sized for one cell of an
-    Avery 8160/5160/5260 1"x2-5/8" address-label sheet."""
+    Avery 8160/5160/5260 1"x2-5/8" address-label sheet.
+
+    Also shows the address-label **batch** (see
+    admin_label_batch_add()/etc. below): several different addresses,
+    each at its own chosen position, so one sheet can print more than
+    one card's worth of address without wasting the other 29 positions
+    on a single lookup."""
     callsign = request.args.get("callsign", "").strip().upper()
     position = labels.clamp_mailing_position(_parse_int(request.args.get("position"), default=1))
     record = None
@@ -471,6 +481,8 @@ def admin_label():
         except Exception:
             error = "Couldn't reach QRZ right now. Try again in a moment."
 
+    batch = session.get("address_batch", [])
+    batch_used_positions = {b["position"] for b in batch}
     return render_template(
         "admin_label.html",
         callsign=callsign,
@@ -479,6 +491,9 @@ def admin_label():
         record=record,
         label_lines=labels.label_lines(record) if record else [],
         error=error,
+        batch=batch,
+        batch_full=len(batch) >= labels.MAILING_LABEL_COUNT,
+        next_batch_position=_next_free_position(batch_used_positions, labels.MAILING_LABEL_COUNT),
     )
 
 
@@ -513,6 +528,132 @@ def admin_label_pdf():
     )
 
 
+@app.route("/admin/label/batch/add", methods=["POST"])
+@admin_required
+def admin_label_batch_add():
+    """Add one address label to the running batch (see admin_label()
+    above) at a Josh-chosen position. Looks the callsign up fresh right
+    now (same gating as the single-label flow) so a bad add fails
+    immediately with a clear reason, rather than only surfacing at
+    print time. Only `callsign`/`position`/`name` (for display) are
+    kept in the session -- never the address itself -- so
+    admin_label_batch_pdf() below always prints whatever QRZ says right
+    now, not a stale snapshot from whenever this was added."""
+    callsign = request.form.get("callsign", "").strip().upper()
+    position = labels.clamp_mailing_position(_parse_int(request.form.get("position"), default=1))
+    redirect_to = url_for("admin_label", callsign=callsign, position=position)
+
+    if not callsign:
+        flash("Enter a callsign to add.", "error")
+        return redirect(redirect_to)
+
+    key = qrz_key_or_none()
+    if not key:
+        return redirect(url_for("admin_login", next=redirect_to))
+
+    try:
+        record = lookup_callsign(key, callsign)
+    except QrzError as exc:
+        flash(f"QRZ lookup failed: {exc}", "error")
+        return redirect(redirect_to)
+    except Exception:
+        flash("Couldn't reach QRZ right now. Try again in a moment.", "error")
+        return redirect(redirect_to)
+
+    if not record.accepts_direct:
+        flash(
+            f"No mailing address on file for {record.callsign} that they've made "
+            "available for a direct card -- not added.",
+            "error",
+        )
+        return redirect(redirect_to)
+
+    batch = session.get("address_batch", [])
+    if len(batch) >= labels.MAILING_LABEL_COUNT:
+        flash(
+            f"That sheet is full ({labels.MAILING_LABEL_COUNT} of "
+            f"{labels.MAILING_LABEL_COUNT} positions used) -- remove one, or "
+            "download/clear the batch first.",
+            "error",
+        )
+    elif any(b["position"] == position for b in batch):
+        flash(
+            f"Position {position} is already used in this batch -- pick a "
+            "different position, or remove that item first.",
+            "error",
+        )
+    else:
+        batch.append({"callsign": record.callsign, "name": record.name, "position": position})
+        session["address_batch"] = batch
+        flash(f"Added {record.callsign} at position {position}.", "success")
+
+    return redirect(redirect_to)
+
+
+@app.route("/admin/label/batch/remove", methods=["POST"])
+@admin_required
+def admin_label_batch_remove():
+    position = _parse_int(request.form.get("position"), default=0)
+    batch = session.get("address_batch", [])
+    session["address_batch"] = [b for b in batch if b["position"] != position]
+    return redirect(url_for("admin_label"))
+
+
+@app.route("/admin/label/batch/clear", methods=["POST"])
+@admin_required
+def admin_label_batch_clear():
+    session.pop("address_batch", None)
+    return redirect(url_for("admin_label"))
+
+
+@app.route("/admin/label/batch/pdf")
+@admin_required
+def admin_label_batch_pdf():
+    """One combined PDF with every address currently in the batch, each
+    at its own chosen position -- everything else on the sheet left
+    blank, same as the single-label PDF. Re-looks-up each callsign
+    fresh (the session only ever kept the callsign/position, never the
+    address) so this always prints current QRZ data."""
+    batch = session.get("address_batch", [])
+    if not batch:
+        abort(400)
+
+    key = qrz_key_or_none()
+    if not key:
+        abort(401)
+
+    items = []
+    dropped = []
+    for entry in batch:
+        try:
+            record = lookup_callsign(key, entry["callsign"])
+        except Exception:
+            dropped.append(entry["callsign"])
+            continue
+        if not record.accepts_direct:
+            dropped.append(entry["callsign"])
+            continue
+        items.append((record, entry["position"]))
+
+    if not items:
+        abort(404)
+
+    if dropped:
+        flash(
+            "Skipped in this print (no longer has a usable address on file): "
+            + ", ".join(dropped),
+            "error",
+        )
+
+    pdf_bytes = labels.generate_mailing_batch_pdf(items)
+    filename = f"qsl-labels-batch-{date.today().isoformat()}.pdf"
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
 def _parse_int(raw: str | None, default: int) -> int:
     try:
         return int(raw) if raw is not None else default
@@ -520,62 +661,15 @@ def _parse_int(raw: str | None, default: int) -> int:
         return default
 
 
-def _qso_key(qso: dict) -> str:
-    """A stable-enough identifier for one QSO within a single callsign's
-    match list, used instead of a database id -- there's no persisted
-    store to hand one out anymore (see admin_qso_label() below), so the
-    "which QSO did you pick" step re-fetches from QRZ and re-matches by
-    this composite of date/time/band/mode/freq instead. Two QSOs with
-    the same callsign colliding on all five of those is not realistic
-    for a ham log."""
-    return "|".join([
-        qso.get("qso_date", ""), qso.get("time_on", ""), qso.get("band", ""),
-        qso.get("mode", ""), qso.get("freq", ""),
-    ])
-
-
-def _rows_from_adif(adif_text: str) -> list[dict]:
-    """Turn QRZ Logbook API ADIF text into the row shape the old
-    ADIF-import store used to produce (qso_date/time_on/band/mode/freq/
-    rst_sent/rst_rcvd) plus a `key` for _qso_key() above, newest first.
-    Shared by _fetch_qso_matches() and _fetch_recent_qsos() below."""
-    rows = []
-    for qso in parse_adif(adif_text):
-        f = qso.fields
-        row = {
-            "callsign": qso.callsign,
-            "qso_date": f.get("qso_date", ""),
-            "time_on": f.get("time_on", ""),
-            "band": f.get("band", "").upper(),
-            "mode": f.get("mode", "").upper(),
-            "freq": f.get("freq", ""),
-            "rst_sent": f.get("rst_sent", ""),
-            "rst_rcvd": f.get("rst_rcvd", ""),
-        }
-        row["key"] = _qso_key(row)
-        rows.append(row)
-    rows.sort(key=lambda r: (r.get("qso_date") or "", r.get("time_on") or ""), reverse=True)
-    return rows
-
-
-def _fetch_qso_matches(callsign: str) -> list[dict]:
-    """Every QSO with `callsign` in Josh's own QRZ Logbook, newest
-    first. Raises QrzLogbookError if the API rejects the request (e.g.
-    a bad/missing key)."""
-    return _rows_from_adif(fetch_logged_qsos(QRZ_LOGBOOK_API_KEY, callsign))
-
-
-def _fetch_recent_qsos(days: int = 3, max_results: int = 100) -> list[dict]:
-    """Diagnostic fallback for admin_qso_label(): the last `days` days
-    of QSOs under ANY callsign, regardless of the CALL: filter -- see
-    qrz.fetch_recent_qsos() for why (short window / generous cap, not
-    the original 30 days / 25 results -- a real production response
-    proved QRZ returns BETWEEN matches oldest-of-the-range first, so a
-    wide window silently truncated before ever reaching "today"). Raises
-    QrzLogbookError the same way _fetch_qso_matches() does; callers
-    should decide whether to surface that or just quietly skip showing
-    the diagnostic list."""
-    return _rows_from_adif(fetch_recent_qsos(QRZ_LOGBOOK_API_KEY, days, max_results))
+def _next_free_position(used: set, count: int) -> int | None:
+    """The lowest sheet position (1..count) not already in `used` --
+    the default a batch "add" form pre-selects, so the common case
+    (keep adding, let it fill in order) needs no extra clicks. Returns
+    None if every position is already taken (the sheet is full)."""
+    for position in range(1, count + 1):
+        if position not in used:
+            return position
+    return None
 
 
 @app.route("/admin/qso-label")
@@ -584,184 +678,53 @@ def admin_qso_label():
     """Print a label of one of Josh's own logged QSOs (callsign,
     date/time in UTC, band/mode/freq, RST sent/received) -- meant to be
     stuck onto a blank 2"x4" spot on the physical QSL card instead of
-    hand-written. Fetched live from Josh's own QRZ Logbook via the QRZ
-    Logbook API (see qrz.fetch_logged_qsos()) -- never the XML Data API
-    used elsewhere in this app, which only knows a station's own
-    profile, not the specifics of a contact with them. Needs
-    QRZ_LOGBOOK_API_KEY configured; doesn't need or use a visitor QRZ
-    login/session at all -- the Logbook API's key is a standing secret,
-    not a per-visitor credential.
+    hand-written. Reads from the imported ADIF log
+    (photomap_store.find_my_qsos()/get_my_qso() -- upload/refresh it at
+    /admin/photomap/import-adif), not a live QRZ fetch -- see the
+    QRZ_LOGBOOK_API_KEY comment near the top of this file for why.
 
     A callsign can have several logged QSOs (repeat contacts, different
     bands/dates), so this is a two-step page: first pick a callsign and
-    see the matches, then pick the specific QSO (`qso_key`) to preview
-    and print."""
+    see the matches, then pick the specific QSO (`qso_key`, really the
+    row's `id` as a string) to preview and print.
+
+    Also shows the QSO-label **batch** (see
+    admin_qso_label_batch_add()/etc. below): several different QSOs,
+    each at its own chosen position, so one sheet can print more than
+    one card's worth of labels without wasting the other 9 positions on
+    a single QSO."""
     callsign = request.args.get("callsign", "").strip().upper()
     qso_key = request.args.get("qso_key", "")
     position = labels.clamp_qso_position(_parse_int(request.args.get("position"), default=1))
 
-    debug = request.args.get("debug") == "1"
-
     matches = []
     qso = None
     error = None
-    recent = []
-    recent_note = None
-    raw_call = None
-    raw_recent = None
-    timing_note = None
 
-    if not QRZ_LOGBOOK_API_KEY:
-        error = "QRZ Logbook API isn't configured yet (QRZ_LOGBOOK_API_KEY isn't set on the server)."
-    elif callsign:
-        # Wall-clock timing, not just an attempt count, so a diagnostic
-        # session can report exactly how many seconds elapsed before
-        # (or whether) QRZ started answering correctly. Two rounds of
-        # guessing a bigger retry *count* (2, then 4, then 8 attempts)
-        # each turned out insufficient in turn -- a 2026-08-24
-        # measurement pinned a real recovery at t=+7.4s once, but the
-        # very next live report showed 9 attempts spanning 14.1s STILL
-        # all coming back empty. That second number is the important
-        # one: QRZ's recovery time isn't a tight, predictable window --
-        # it varies meaningfully run to run, and there's no evidence
-        # it's bounded by any number small enough to keep blocking a
-        # single page load on synchronously (Render/gunicorn's own
-        # request timeout is a real ceiling on how long this can grow).
-        # RETRY_COUNT below is kept at a level that already resolves
-        # the common/faster case; for the slower case, the design
-        # deliberately stops trying to out-guess QRZ's timing and
-        # instead makes retrying by hand (below) fast and obvious.
-        fetch_start = time.time()
-
-        def _elapsed():
-            return round(time.time() - fetch_start, 1)
-
+    if callsign:
         try:
-            matches = _fetch_qso_matches(callsign)
-        except QrzLogbookError as exc:
-            error = str(exc)
-        except Exception:
-            error = "Couldn't reach QRZ's Logbook API right now. Try again in a moment."
-
-        # Retry several times (short pause between) before concluding
-        # "not found" -- see the timing comment above for why this
-        # count is no longer being chased upward. A retry attempt that
-        # itself throws (a genuine transient network blip, not QRZ
-        # answering "empty") is treated the same as an empty result and
-        # the loop keeps going, rather than aborting the whole window
-        # on one bad attempt -- previously a single such exception would
-        # have silently cut the retry budget short of what `timing_note`
-        # claimed. This costs time only in the not-rare-enough case; a
-        # search that finds something on the first try never touches
-        # this loop.
-        RETRY_COUNT = 8
-        attempts_made = 1
-        retry_error_count = 0
+            matches = photomap_store.find_my_qsos(callsign)
+        except S3Error as exc:
+            error = s3_config_hint(exc)
+            matches = []
         if not error and not matches:
-            for _ in range(RETRY_COUNT):
-                time.sleep(1.5)
-                attempts_made += 1
-                try:
-                    matches = _fetch_qso_matches(callsign)
-                except Exception:
-                    retry_error_count += 1
-                    continue
-                if matches:
-                    break
-
-        if not error and not matches:
-            note = (
-                f"The primary search plus its retries took {_elapsed()}s total "
-                f"({attempts_made} attempts"
-            )
-            if retry_error_count:
-                note += f", {retry_error_count} of which failed outright rather than just coming back empty"
-            note += ") before giving up."
-            timing_note = note
             error = (
-                f"No logged QSO with {callsign} found in your QRZ Logbook via the API yet. "
-                "QRZ's Logbook API has been observed to answer this exact request "
-                "inconsistently right after a QSO is logged -- sometimes it resolves within "
-                "a few seconds, sometimes it takes longer than one page load can reasonably "
-                "wait for. If you just logged this, wait a few more seconds and use the "
-                "\"Search again\" link below (no need to retype the callsign) -- it should "
-                "turn up within a try or two. The list below shows what your API key can see "
-                "right now, in case it's under a slightly different call."
+                f"No logged QSO with {callsign} found in your imported ADIF log. "
+                "If you've logged this contact since your last import, upload an "
+                "updated ADIF export first (see the link below the search box)."
             )
-            # Diagnostic -- surface exactly what happened (empty-but-OK vs.
-            # an outright failure) rather than just logging it server-side,
-            # since Josh can't see Render's logs from the page itself.
-            # Uses a short (3-day) window, not a long one -- see
-            # _fetch_recent_qsos()'s docstring: a real production response
-            # proved QRZ returns BETWEEN matches oldest-of-the-range
-            # first, so on any active logging day a wide window truncates
-            # at MAX before ever reaching "today", making the diagnostic
-            # silently show only stale data from the start of the window.
-            try:
-                recent = _fetch_recent_qsos()
-                if not recent:
-                    recent_note = (
-                        "Checked: your API key shows zero QSOs logged in the last 3 days, "
-                        "under ANY callsign. If that doesn't match what you see on QRZ's own "
-                        "logbook page, this API key is most likely scoped to a different "
-                        "logbook/callsign than the one you're viewing on qrz.com -- worth "
-                        "checking Logbook -> Settings -> API on QRZ to confirm which logbook "
-                        "this key belongs to."
-                    )
-            except QrzLogbookError as exc:
-                logger.warning("QRZ Logbook recent-QSO diagnostic fetch failed: %s", exc)
-                recent_note = f"Couldn't check recent QSOs either -- QRZ said: {exc}"
-            except Exception as exc:
-                logger.warning("QRZ Logbook recent-QSO diagnostic fetch failed: %s", exc)
-                recent_note = f"Couldn't check recent QSOs either ({type(exc).__name__}: {exc})."
-
-            # Raw-response debug view, opt-in via ?debug=1 -- shows the
-            # literal, completely unparsed bytes QRZ sent back, so a "the
-            # API genuinely has nothing" conclusion can be checked
-            # against the actual response rather than this module's
-            # interpretation of it. Keeps firing the CALL: request past
-            # where the real retry loop above gives up (6 more attempts,
-            # ~1.5s apart -- about 9 more seconds), each one tagged with
-            # its elapsed time since this page load started, so a
-            # diagnostic session produces a real "found at T=+X.Xs"
-            # number instead of just an attempt count. Every debug
-            # session run so far has found the QSO within these extra
-            # attempts even when the real retry loop (which stops
-            # earlier) didn't -- the goal here is pinning down exactly
-            # how long "long enough" actually is, since two successive
-            # guesses at a bigger retry count (2, then 4) both turned out
-            # short.
-            if debug:
-                raw_call_attempts = []
-                for attempt in range(6):
-                    ts = _elapsed()
-                    try:
-                        text = fetch_raw(QRZ_LOGBOOK_API_KEY, call_option(callsign))
-                    except Exception as exc:
-                        text = f"(raw fetch itself failed: {type(exc).__name__}: {exc})"
-                    raw_call_attempts.append((ts, text))
-                    if attempt < 5:
-                        time.sleep(1.5)
-                raw_call = raw_call_attempts
-                try:
-                    raw_recent = fetch_raw(QRZ_LOGBOOK_API_KEY, recent_option())
-                except Exception as exc:
-                    raw_recent = f"(raw fetch itself failed: {type(exc).__name__}: {exc})"
         elif not error and qso_key:
-            qso = next((m for m in matches if m["key"] == qso_key), None)
+            qso = next((m for m in matches if str(m["id"]) == qso_key), None)
             if qso is None:
-                error = "That logged QSO couldn't be found -- your QRZ Logbook may have changed."
+                error = "That logged QSO couldn't be found -- try picking it again."
             else:
                 # A specific QSO was picked -- show its preview, not the
                 # full match table again.
                 matches = []
 
-    # This page hits QRZ's live Logbook API on every load -- caching it
-    # (browser back/forward cache, a shared proxy, etc.) risks showing a
-    # stale "not found" result even after the underlying QRZ data has
-    # changed, which is exactly the kind of confusion this route can't
-    # afford given how much of it depends on being genuinely live.
-    response = Response(render_template(
+    batch = session.get("qso_batch", [])
+    batch_used_positions = {b["position"] for b in batch}
+    return render_template(
         "admin_qso_label.html",
         callsign=callsign,
         position=position,
@@ -770,43 +733,133 @@ def admin_qso_label():
         qso=qso,
         qso_label_lines=labels.qso_label_lines(qso) if qso else [],
         error=error,
-        recent=recent,
-        recent_note=recent_note,
-        timing_note=timing_note,
-        debug=debug,
-        raw_call=raw_call,
-        raw_recent=raw_recent,
-    ))
-    response.headers["Cache-Control"] = "no-store"
-    return response
+        batch=batch,
+        batch_full=len(batch) >= labels.QSO_LABEL_COUNT,
+        next_batch_position=_next_free_position(batch_used_positions, labels.QSO_LABEL_COUNT),
+    )
 
 
 @app.route("/admin/qso-label/pdf")
 @admin_required
 def admin_qso_label_pdf():
-    callsign = request.args.get("callsign", "").strip().upper()
     qso_key = request.args.get("qso_key", "")
     position = labels.clamp_qso_position(_parse_int(request.args.get("position"), default=1))
-    if not callsign or not qso_key:
+    if not qso_key:
         abort(400)
 
-    if not QRZ_LOGBOOK_API_KEY:
-        abort(503)
-
+    qso_id = _parse_int(qso_key, default=0)
     try:
-        matches = _fetch_qso_matches(callsign)
-    except QrzLogbookError as exc:
-        logger.warning("QRZ Logbook error: %s", exc)
+        qso = photomap_store.get_my_qso(qso_id) if qso_id else None
+    except S3Error:
         abort(502)
-    except Exception:
-        abort(502)
-
-    qso = next((m for m in matches if m["key"] == qso_key), None)
     if qso is None:
         abort(404)
 
     pdf_bytes = labels.generate_qso_label_pdf(qso, position)
     filename = f"qso-label-{qso['callsign']}-{qso.get('qso_date', '')}.pdf"
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@app.route("/admin/qso-label/batch/add", methods=["POST"])
+@admin_required
+def admin_qso_label_batch_add():
+    """Add one QSO label to the running batch (see admin_qso_label()
+    above) at a Josh-chosen position. Only `qso_id`/`position` plus
+    `callsign`/`qso_date` (for display) are kept in the session --
+    admin_qso_label_batch_pdf() below re-reads the full record fresh
+    from photomap_store at print time."""
+    qso_id = _parse_int(request.form.get("qso_id"), default=0)
+    position = labels.clamp_qso_position(_parse_int(request.form.get("position"), default=1))
+    callsign = request.form.get("callsign", "").strip().upper()
+    redirect_to = url_for("admin_qso_label", callsign=callsign)
+
+    try:
+        qso = photomap_store.get_my_qso(qso_id) if qso_id else None
+    except S3Error as exc:
+        flash(s3_config_hint(exc), "error")
+        return redirect(redirect_to)
+    if qso is None:
+        flash("Couldn't find that QSO to add -- try picking it again.", "error")
+        return redirect(redirect_to)
+
+    batch = session.get("qso_batch", [])
+    if len(batch) >= labels.QSO_LABEL_COUNT:
+        flash(
+            f"That sheet is full ({labels.QSO_LABEL_COUNT} of "
+            f"{labels.QSO_LABEL_COUNT} positions used) -- remove one, or "
+            "download/clear the batch first.",
+            "error",
+        )
+    elif any(b["position"] == position for b in batch):
+        flash(
+            f"Position {position} is already used in this batch -- pick a "
+            "different position, or remove that item first.",
+            "error",
+        )
+    else:
+        batch.append({
+            "qso_id": qso_id,
+            "position": position,
+            "callsign": qso["callsign"],
+            "qso_date": qso.get("qso_date", ""),
+        })
+        session["qso_batch"] = batch
+        flash(f"Added {qso['callsign']} ({qso.get('qso_date', '')}) at position {position}.", "success")
+
+    return redirect(redirect_to)
+
+
+@app.route("/admin/qso-label/batch/remove", methods=["POST"])
+@admin_required
+def admin_qso_label_batch_remove():
+    position = _parse_int(request.form.get("position"), default=0)
+    batch = session.get("qso_batch", [])
+    session["qso_batch"] = [b for b in batch if b["position"] != position]
+    return redirect(url_for("admin_qso_label"))
+
+
+@app.route("/admin/qso-label/batch/clear", methods=["POST"])
+@admin_required
+def admin_qso_label_batch_clear():
+    session.pop("qso_batch", None)
+    return redirect(url_for("admin_qso_label"))
+
+
+@app.route("/admin/qso-label/batch/pdf")
+@admin_required
+def admin_qso_label_batch_pdf():
+    """One combined PDF with every QSO currently in the batch, each at
+    its own chosen position -- everything else on the sheet left blank,
+    same as the single-label PDF. Re-reads each QSO fresh from
+    photomap_store (the session only ever kept the id/position)."""
+    batch = session.get("qso_batch", [])
+    if not batch:
+        abort(400)
+
+    items = []
+    dropped = 0
+    for entry in batch:
+        try:
+            qso = photomap_store.get_my_qso(entry["qso_id"])
+        except S3Error:
+            abort(502)
+        if qso is None:
+            dropped += 1
+            continue
+        items.append((qso, entry["position"]))
+
+    if not items:
+        abort(404)
+
+    if dropped:
+        flash(f"Skipped {dropped} item(s) in this print -- no longer found in your imported log.", "error")
+
+    pdf_bytes = labels.generate_qso_batch_pdf(items)
+    filename = f"qso-labels-batch-{date.today().isoformat()}.pdf"
     return Response(
         pdf_bytes,
         mimetype="application/pdf",

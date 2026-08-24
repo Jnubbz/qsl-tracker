@@ -128,6 +128,22 @@ button:hover { opacity: 0.9; }
 
 .link-button.danger { color: var(--danger); }
 
+/* Standard accessible-hide pattern: present for screen readers, taken
+   out of the visual flow -- used for form labels on compact inline
+   controls (e.g. a batch row's position picker) where a visible label
+   would be redundant next to the surrounding table/column text. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .dashboard-top {
   display: flex;
   justify-content: space-between;

@@ -12,7 +12,7 @@
       Look up a callsign against QRZ and, if they have a mailing address on
       file for a direct card, get a print-ready PDF sized for one cell of an
       Avery 8160 / 5160 / 5260 sheet (1"&times;2-5/8", 30 per page, 3 columns
-      &times; 10 rows). Only the position you pick gets filled in, so you can
+      &times; 10 rows). Only the position(s) you pick get filled in, so you can
       keep using a partially-used sheet. Looking for QSO details (band,
       mode, RST) to stick on the card itself instead?
       <a href="{{ url_for('admin_qso_label') }}">Print a QSO label</a>.
@@ -39,6 +39,44 @@
     </section>
   {% endif %}
 
+  {% if batch %}
+    <section class="card">
+      <h1>Batch ({{ batch | length }} of {{ label_count }})</h1>
+      <p class="muted">
+        Everything below prints together on one sheet, each at its own
+        position &mdash; nothing else on the sheet is touched. Addresses
+        are re-fetched from QRZ fresh at print time, never saved here.
+      </p>
+      <table class="contacts">
+        <thead>
+          <tr><th>Position</th><th>Callsign</th><th>Name</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for b in batch | sort(attribute='position') %}
+            <tr>
+              <td>{{ b.position }}</td>
+              <td>{{ b.callsign }}</td>
+              <td>{{ b.name or '-' }}</td>
+              <td>
+                <form method="post" action="{{ url_for('admin_label_batch_remove') }}" style="display: inline;">
+                  <input type="hidden" name="position" value="{{ b.position }}">
+                  <button type="submit" class="link-button">Remove</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p style="margin-top: 1rem;">
+        <a class="button-link" href="{{ url_for('admin_label_batch_pdf') }}" target="_blank" rel="noopener">Download batch PDF ({{ batch | length }} label{{ 's' if batch | length != 1 else '' }})</a>
+        &nbsp;
+        <form method="post" action="{{ url_for('admin_label_batch_clear') }}" style="display: inline;">
+          <button type="submit" class="link-button">Clear batch</button>
+        </form>
+      </p>
+    </section>
+  {% endif %}
+
   {% if record %}
     <section class="card">
       <h1>Preview</h1>
@@ -54,6 +92,19 @@
       <a class="button-link"
          href="{{ url_for('admin_label_pdf', callsign=record.callsign, position=position) }}"
          target="_blank" rel="noopener">Download PDF label</a>
+
+      {% if not batch_full %}
+        <form method="post" action="{{ url_for('admin_label_batch_add') }}" style="margin-top: 1rem;">
+          <input type="hidden" name="callsign" value="{{ record.callsign }}">
+          <label for="batch-position">Or add this one to the batch at position</label>
+          <select id="batch-position" name="position">
+            {% for i in range(1, label_count + 1) %}
+              <option value="{{ i }}" {% if i == next_batch_position %}selected{% endif %}>{{ i }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit">Add to batch</button>
+        </form>
+      {% endif %}
     </section>
   {% endif %}
 {% endblock %}

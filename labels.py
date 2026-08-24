@@ -24,10 +24,16 @@ hand-verified to add up to an exact 8.5in x 11in US Letter sheet:
     LEFT_MARGIN + columns*LABEL_W + (columns-1)*H_GAP + RIGHT_MARGIN == 8.5in
     TOP_MARGIN + rows*LABEL_H + BOTTOM_MARGIN == 11.0in
 
-Either PDF is always a full US Letter page with only ONE label position
-filled in and the rest left blank, so a partially-used physical sheet
-(common once you're printing labels one lookup at a time) can be fed
-back into the printer at whichever position is still unused.
+A single-label PDF (`generate_mailing_label_pdf`/`generate_qso_label_pdf`)
+is always a full US Letter page with only ONE label position filled in
+and the rest left blank, so a partially-used physical sheet (common
+once you're printing labels one lookup at a time) can be fed back into
+the printer at whichever position is still unused. A **batch** PDF
+(`generate_mailing_batch_pdf`/`generate_qso_batch_pdf`) is the same
+idea generalized: several different labels, each at its own explicitly
+chosen position, on one page -- everything else still left blank. Both
+kinds share one page-rendering core (`_render_pdf_multi`) so there's
+only one place that knows how to lay text out inside a label cell.
 """
 from __future__ import annotations
 
@@ -256,31 +262,42 @@ def qso_label_lines(qso: dict) -> list[tuple[str, str, float]]:
     return _wrap_lines(raw_lines, QSO_LAYOUT)
 
 
-def _render_pdf(
-    lines: list[tuple[str, str, float]], position: int, title: str, layout: SheetLayout
+def _render_pdf_multi(
+    entries: list[tuple[list[tuple[str, str, float]], int]], title: str, layout: SheetLayout
 ) -> bytes:
-    """Render a US Letter PDF with `lines` filled in at label `position`
-    on the given `layout`, everything else left blank -- shared by both
-    label kinds."""
-    x0, y0 = layout.origin(position)
-
-    block_height = layout.line_height * len(lines)
-    top_of_block = y0 + (layout.label_h + block_height) / 2
-    inner_x = x0 + layout.padding
-
+    """Render a single US Letter PDF page with each (lines, position) in
+    `entries` filled in at its own label position on the given `layout`,
+    everything else left blank. Shared by every PDF generator below --
+    the single-label ones just pass a one-item list, so there's exactly
+    one place that knows how to lay text out inside a label cell."""
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
     c.setTitle(title)
 
-    y = top_of_block - layout.line_height
-    for text, font, size in lines:
-        c.setFont(font, size)
-        c.drawString(inner_x, y, text)
-        y -= layout.line_height
+    for lines, position in entries:
+        x0, y0 = layout.origin(position)
+        block_height = layout.line_height * len(lines)
+        top_of_block = y0 + (layout.label_h + block_height) / 2
+        inner_x = x0 + layout.padding
+
+        y = top_of_block - layout.line_height
+        for text, font, size in lines:
+            c.setFont(font, size)
+            c.drawString(inner_x, y, text)
+            y -= layout.line_height
 
     c.showPage()
     c.save()
     return buffer.getvalue()
+
+
+def _render_pdf(
+    lines: list[tuple[str, str, float]], position: int, title: str, layout: SheetLayout
+) -> bytes:
+    """Render a US Letter PDF with `lines` filled in at label `position`
+    on the given `layout`, everything else left blank -- the
+    one-label case of _render_pdf_multi() above."""
+    return _render_pdf_multi([(lines, position)], title, layout)
 
 
 def generate_mailing_label_pdf(record: QrzRecord, position: int = 1) -> bytes:
@@ -299,3 +316,21 @@ def generate_qso_label_pdf(qso: dict, position: int = 1) -> bytes:
     return _render_pdf(
         qso_label_lines(qso), position, f"QSO label -- {qso.get('callsign', '')}", QSO_LAYOUT
     )
+
+
+def generate_mailing_batch_pdf(items: list[tuple[QrzRecord, int]]) -> bytes:
+    """Render a single US Letter PDF with several different QSL mailing
+    labels, each `(record, position)` pair filled in at its own
+    position (1-30, Avery 8160 layout) -- so one sheet can carry more
+    than one address instead of using a whole page for just one."""
+    entries = [(label_lines(record), position) for record, position in items]
+    return _render_pdf_multi(entries, "QSL mailing label batch", MAILING_LAYOUT)
+
+
+def generate_qso_batch_pdf(items: list[tuple[dict, int]]) -> bytes:
+    """Render a single US Letter PDF with several different QSO labels,
+    each `(qso, position)` pair filled in at its own position (1-10,
+    Avery 5163 layout) -- so one sheet can carry more than one QSO
+    instead of using a whole page for just one."""
+    entries = [(qso_label_lines(qso), position) for qso, position in items]
+    return _render_pdf_multi(entries, "QSO label batch", QSO_LAYOUT)
