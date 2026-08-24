@@ -29,6 +29,9 @@
   {% if error %}
     <section class="card">
       <p class="flag-missing">{{ error }}</p>
+      {% if timing_note %}
+        <p class="muted">{{ timing_note }}</p>
+      {% endif %}
     </section>
   {% endif %}
 
@@ -81,14 +84,16 @@
         interpretation.
       </p>
       {% if raw_call %}
-        <p><strong>CALL:{{ callsign }} request, fired 3 times ~1.5s apart</strong>
-          &mdash; if these disagree with each other, QRZ's own backend is
-          answering the identical request inconsistently; if all three
-          agree, the earlier lucky result either wasn't a fluke (and
-          something changed since) or was a one-off blip.</p>
-        {% for attempt in raw_call %}
-          <p class="muted">Attempt {{ loop.index }}:</p>
-          <pre style="white-space: pre-wrap; word-break: break-word; background: rgba(0,0,0,0.25); padding: 0.75rem; border-radius: 6px;">{{ attempt }}</pre>
+        <p><strong>CALL:{{ callsign }} request, fired repeatedly ~1.5s apart</strong>
+          &mdash; each one tagged with its elapsed time since this page
+          load started (includes the primary search and its retries, so
+          these times are the real "how long until QRZ answers
+          correctly" picture). Watch for the first attempt where
+          RESULT/COUNT flips from empty to a real match -- that's the
+          number worth sizing the real retry window to.</p>
+        {% for ts, text in raw_call %}
+          <p class="muted">Attempt {{ loop.index }} (t=+{{ ts }}s since page load):</p>
+          <pre style="white-space: pre-wrap; word-break: break-word; background: rgba(0,0,0,0.25); padding: 0.75rem; border-radius: 6px;">{{ text }}</pre>
         {% endfor %}
       {% endif %}
       {% if raw_recent %}

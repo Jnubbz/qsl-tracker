@@ -605,10 +605,27 @@ def admin_qso_label():
     recent_note = None
     raw_call = None
     raw_recent = None
+    timing_note = None
 
     if not QRZ_LOGBOOK_API_KEY:
         error = "QRZ Logbook API isn't configured yet (QRZ_LOGBOOK_API_KEY isn't set on the server)."
     elif callsign:
+        # Wall-clock timing, not just an attempt count, so a diagnostic
+        # session can report exactly how many seconds elapsed before
+        # (or whether) QRZ started answering correctly -- three rounds
+        # of guessing a bigger retry *count* (2, then 4 attempts) each
+        # turned out insufficient, and each time the debug view's own
+        # follow-up attempts found the QSO anyway, just later. Without
+        # real elapsed-time numbers, widening the count again is still
+        # a guess; with them, the actual required wait time can be
+        # measured directly instead of estimated from attempt counts
+        # and a nominal (but not always accurate, under real network
+        # latency) sleep duration.
+        fetch_start = time.time()
+
+        def _elapsed():
+            return round(time.time() - fetch_start, 1)
+
         try:
             matches = _fetch_qso_matches(callsign)
         except QrzLogbookError as exc:
@@ -622,15 +639,12 @@ def admin_qso_label():
         # inconsistently between near-simultaneous calls: the very first
         # fetch on a page load came back with zero matches, then several
         # more identical fetches came back with the same real, correct
-        # QSO. A first tuning of this (2 retries, ~3s total) turned out
-        # not to be enough margin -- a follow-up debug session showed a
-        # miss streak of at least 3 identical attempts in a row (the
-        # primary fetch plus both of those retries) before QRZ started
-        # answering correctly again on the 4th attempt. Widened to 4
-        # retries (5 total attempts, ~8s worst case) for real margin
-        # beyond the longest miss streak actually observed so far. This
-        # costs time only in that apparently-not-rare case; a search
-        # that finds something on the first try never touches this loop.
+        # QSO. Two successive tunings of this (2 retries, then 4) each
+        # turned out not to be enough margin -- see `timing_note` below
+        # and the debug view's per-attempt timestamps for the real
+        # numbers once available. This costs time only in that
+        # apparently-not-rare case; a search that finds something on the
+        # first try never touches this loop.
         if not error and not matches:
             for _ in range(4):
                 time.sleep(1.5)
@@ -647,6 +661,10 @@ def admin_qso_label():
                     break
 
         if not error and not matches:
+            timing_note = (
+                f"The primary search plus its retries took {_elapsed()}s total "
+                "(5 attempts, all came back empty) before giving up."
+            )
             error = (
                 f"No logged QSO with {callsign} found in your QRZ Logbook via the API. "
                 "If you just logged this, QRZ's API can occasionally lag a few minutes "
@@ -678,25 +696,28 @@ def admin_qso_label():
             # literal, completely unparsed bytes QRZ sent back, so a "the
             # API genuinely has nothing" conclusion can be checked
             # against the actual response rather than this module's
-            # interpretation of it. The CALL: request is fired three
-            # times in a row (a couple seconds apart) rather than once --
-            # a single debug fetch previously came back RESULT=OK,
-            # COUNT=1 with a real, fully-parseable QSO, while the normal
-            # search page (same exact request, confirmed via a hard
-            # refresh so it isn't a browser-cache artifact) kept
-            # reporting zero matches moments later. Repeating the request
-            # here is how to tell "QRZ is genuinely inconsistent between
-            # near-simultaneous identical calls" apart from "that one
-            # lucky response was a fluke that won't reproduce" -- both
-            # are real possibilities and neither should be assumed.
+            # interpretation of it. Keeps firing the CALL: request past
+            # where the real retry loop above gives up (6 more attempts,
+            # ~1.5s apart -- about 9 more seconds), each one tagged with
+            # its elapsed time since this page load started, so a
+            # diagnostic session produces a real "found at T=+X.Xs"
+            # number instead of just an attempt count. Every debug
+            # session run so far has found the QSO within these extra
+            # attempts even when the real retry loop (which stops
+            # earlier) didn't -- the goal here is pinning down exactly
+            # how long "long enough" actually is, since two successive
+            # guesses at a bigger retry count (2, then 4) both turned out
+            # short.
             if debug:
                 raw_call_attempts = []
-                for attempt in range(3):
+                for attempt in range(6):
+                    ts = _elapsed()
                     try:
-                        raw_call_attempts.append(fetch_raw(QRZ_LOGBOOK_API_KEY, call_option(callsign)))
+                        text = fetch_raw(QRZ_LOGBOOK_API_KEY, call_option(callsign))
                     except Exception as exc:
-                        raw_call_attempts.append(f"(raw fetch itself failed: {type(exc).__name__}: {exc})")
-                    if attempt < 2:
+                        text = f"(raw fetch itself failed: {type(exc).__name__}: {exc})"
+                    raw_call_attempts.append((ts, text))
+                    if attempt < 5:
                         time.sleep(1.5)
                 raw_call = raw_call_attempts
                 try:
@@ -728,6 +749,7 @@ def admin_qso_label():
         error=error,
         recent=recent,
         recent_note=recent_note,
+        timing_note=timing_note,
         debug=debug,
         raw_call=raw_call,
         raw_recent=raw_recent,
