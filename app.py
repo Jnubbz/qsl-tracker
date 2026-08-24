@@ -616,6 +616,30 @@ def admin_qso_label():
         except Exception:
             error = "Couldn't reach QRZ's Logbook API right now. Try again in a moment."
 
+        # Retry a couple of times (short pause between) before concluding
+        # "not found". A 2026-08-24 debug session proved QRZ's Logbook
+        # API can answer the exact same CALL:<callsign> request
+        # inconsistently between near-simultaneous calls: the very first
+        # fetch on a page load came back with zero matches, then three
+        # more identical fetches moments later (~1.5s apart) all came
+        # back with the same real, correct QSO -- every time. This costs
+        # a few seconds only in that apparently-not-rare case; a search
+        # that finds something on the first try never touches this loop.
+        if not error and not matches:
+            for _ in range(2):
+                time.sleep(1.5)
+                try:
+                    matches = _fetch_qso_matches(callsign)
+                except Exception:
+                    # A retry failing outright isn't more informative than
+                    # the empty result already in hand -- fall through to
+                    # the "not found" diagnostics below rather than
+                    # replacing a clear (if disappointing) state with a
+                    # transient fetch error.
+                    break
+                if matches:
+                    break
+
         if not error and not matches:
             error = (
                 f"No logged QSO with {callsign} found in your QRZ Logbook via the API. "
