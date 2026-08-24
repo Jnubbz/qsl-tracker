@@ -11,8 +11,8 @@
     <p class="muted">
       Look up a callsign against QRZ and, if they have a mailing address on
       file for a direct card, get a print-ready PDF sized for one cell of an
-      Avery 5163 / 8163 / 18163 sheet (2"&times;4", 10 per page, 2 columns
-      &times; 5 rows). Only the position you pick gets filled in, so you can
+      Avery 8160 / 5160 / 5260 sheet (1"&times;2-5/8", 30 per page, 3 columns
+      &times; 10 rows). Only the position you pick gets filled in, so you can
       keep using a partially-used sheet. Looking for QSO details (band,
       mode, RST) to stick on the card itself instead?
       <a href="{{ url_for('admin_qso_label') }}">Print a QSO label</a>.
@@ -42,13 +42,13 @@
   {% if record %}
     <section class="card">
       <h1>Preview</h1>
-      <div class="label-preview">
+      <div class="label-preview label-preview--8160">
         {% for text, font, size in label_lines %}
           <p class="{{ 'label-preview-header' if loop.first else 'label-preview-line' }}">{{ text }}</p>
         {% endfor %}
       </div>
       <p class="muted" style="margin-top: 1rem;">
-        Position {{ position }} of {{ label_count }} on the Avery 5163/8163/18163
+        Position {{ position }} of {{ label_count }} on the Avery 8160/5160/5260
         layout. Sourced from QRZ just now &mdash; not saved anywhere in QSL Tracker.
       </p>
       <a class="button-link"

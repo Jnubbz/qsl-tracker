@@ -422,9 +422,9 @@ def admin_label():
     main dashboard -- see qrz.py) and, if there's an address on file for
     a direct card, shows an on-screen preview plus a link to a print-ready
     PDF (see /admin/label/pdf and labels.py) sized for one cell of an
-    Avery 5163/8163/18163 2"x4" shipping-label sheet."""
+    Avery 8160/5160/5260 1"x2-5/8" address-label sheet."""
     callsign = request.args.get("callsign", "").strip().upper()
-    position = labels.clamp_position(_parse_int(request.args.get("position"), default=1))
+    position = labels.clamp_mailing_position(_parse_int(request.args.get("position"), default=1))
     record = None
     error = None
 
@@ -456,7 +456,7 @@ def admin_label():
         "admin_label.html",
         callsign=callsign,
         position=position,
-        label_count=labels.LABEL_COUNT,
+        label_count=labels.MAILING_LABEL_COUNT,
         record=record,
         label_lines=labels.label_lines(record) if record else [],
         error=error,
@@ -467,7 +467,7 @@ def admin_label():
 @admin_required
 def admin_label_pdf():
     callsign = request.args.get("callsign", "").strip().upper()
-    position = labels.clamp_position(_parse_int(request.args.get("position"), default=1))
+    position = labels.clamp_mailing_position(_parse_int(request.args.get("position"), default=1))
     if not callsign:
         abort(400)
 
@@ -485,7 +485,7 @@ def admin_label_pdf():
     if not record.accepts_direct:
         abort(404)
 
-    pdf_bytes = labels.generate_avery_5163_pdf(record, position)
+    pdf_bytes = labels.generate_mailing_label_pdf(record, position)
     filename = f"qsl-label-{record.callsign}.pdf"
     return Response(
         pdf_bytes,
@@ -517,7 +517,7 @@ def admin_qso_label():
     and print."""
     callsign = request.args.get("callsign", "").strip().upper()
     qso_id = _parse_int(request.args.get("qso_id"), default=0)
-    position = labels.clamp_position(_parse_int(request.args.get("position"), default=1))
+    position = labels.clamp_qso_position(_parse_int(request.args.get("position"), default=1))
 
     matches = []
     qso = None
@@ -546,7 +546,7 @@ def admin_qso_label():
         "admin_qso_label.html",
         callsign=callsign,
         position=position,
-        label_count=labels.LABEL_COUNT,
+        label_count=labels.QSO_LABEL_COUNT,
         matches=matches,
         qso=qso,
         qso_label_lines=labels.qso_label_lines(qso) if qso else [],
@@ -558,7 +558,7 @@ def admin_qso_label():
 @admin_required
 def admin_qso_label_pdf():
     qso_id = _parse_int(request.args.get("qso_id"), default=0)
-    position = labels.clamp_position(_parse_int(request.args.get("position"), default=1))
+    position = labels.clamp_qso_position(_parse_int(request.args.get("position"), default=1))
     if not qso_id:
         abort(400)
 
@@ -571,7 +571,7 @@ def admin_qso_label_pdf():
     if qso is None:
         abort(404)
 
-    pdf_bytes = labels.generate_qso_avery_5163_pdf(qso, position)
+    pdf_bytes = labels.generate_qso_label_pdf(qso, position)
     filename = f"qso-label-{qso['callsign']}-{qso.get('qso_date', '')}.pdf"
     return Response(
         pdf_bytes,

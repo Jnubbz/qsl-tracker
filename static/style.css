@@ -304,33 +304,43 @@ table.contacts tr.direct { background: rgba(47, 157, 111, 0.12); }
 
 .button-link:hover { opacity: 0.9; }
 
+/* Base look shared by both label previews -- sized per label type by the
+   --5163 / --8160 modifier below. Font sizes are given in "pt" units
+   deliberately (not rem/px): a CSS point is the same 1/72in reportlab
+   draws PDF text in, so these previews are proportionally accurate to
+   the real printed label, not just a same-ish-looking mockup. */
 .label-preview {
-  width: 4in;
   max-width: 100%;
-  aspect-ratio: 2 / 1;
   background: #ffffff;
   color: #111111;
   border-radius: 4px;
   border: 1px solid var(--border);
-  padding: 0.25in;
   display: flex;
   flex-direction: column;
   justify-content: center;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
 }
 
-.label-preview p {
-  margin: 0.12in 0 0;
-  line-height: 1.2;
-}
+.label-preview p { line-height: 1.2; }
+.label-preview p:first-child { margin-top: 0 !important; }
+.label-preview-header { font-weight: 700; }
 
-.label-preview p:first-child { margin-top: 0; }
-
-.label-preview-header {
-  font-weight: 700;
-  font-size: 1rem;
+/* Avery 5163/8163/18163 -- 2"x4" QSO label */
+.label-preview--5163 {
+  width: 4in;
+  aspect-ratio: 2 / 1;
+  padding: 0.2in;
 }
+.label-preview--5163 p { margin: 0.1in 0 0; }
+.label-preview--5163 .label-preview-header { font-size: 12pt; }
+.label-preview--5163 .label-preview-line { font-size: 10.5pt; }
 
-.label-preview-line {
-  font-size: 0.9rem;
+/* Avery 8160/5160/5260 -- 1"x2-5/8" mailing label */
+.label-preview--8160 {
+  width: 2.625in;
+  aspect-ratio: 2.625 / 1;
+  padding: 0.09in;
 }
+.label-preview--8160 p { margin: 0.05in 0 0; }
+.label-preview--8160 .label-preview-header { font-size: 9pt; }
+.label-preview--8160 .label-preview-line { font-size: 8pt; }
