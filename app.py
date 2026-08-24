@@ -501,6 +501,85 @@ def _parse_int(raw: str | None, default: int) -> int:
         return default
 
 
+@app.route("/admin/qso-label")
+@admin_required
+def admin_qso_label():
+    """Print a label of one of Josh's own logged QSOs (callsign,
+    date/time in UTC, band/mode/freq, RST sent/received) -- meant to be
+    stuck onto a blank 2"x4" spot on the physical QSL card instead of
+    hand-written. Pulled entirely from the ADIF-imported `my_qsos` store
+    (see photomap_store.py) -- never QRZ, which only knows a station's
+    own profile, not the specifics of a contact with them.
+
+    A callsign can have several logged QSOs (repeat contacts, different
+    bands/dates), so this is a two-step page: first pick a callsign and
+    see the matches, then pick the specific QSO (`qso_id`) to preview
+    and print."""
+    callsign = request.args.get("callsign", "").strip().upper()
+    qso_id = _parse_int(request.args.get("qso_id"), default=0)
+    position = labels.clamp_position(_parse_int(request.args.get("position"), default=1))
+
+    matches = []
+    qso = None
+    error = None
+
+    if qso_id:
+        try:
+            qso = photomap_store.get_my_qso(qso_id)
+        except S3Error as exc:
+            flash(s3_config_hint(exc), "error")
+            return redirect(url_for("admin_qso_label"))
+        if qso is None:
+            error = "That logged QSO no longer exists."
+        else:
+            callsign = qso["callsign"]
+    elif callsign:
+        try:
+            matches = photomap_store.find_my_qsos(callsign)
+        except S3Error as exc:
+            flash(s3_config_hint(exc), "error")
+            return redirect(url_for("admin_qso_label"))
+        if not matches:
+            error = f"No logged QSO with {callsign} found in your imported ADIF log."
+
+    return render_template(
+        "admin_qso_label.html",
+        callsign=callsign,
+        position=position,
+        label_count=labels.LABEL_COUNT,
+        matches=matches,
+        qso=qso,
+        qso_label_lines=labels.qso_label_lines(qso) if qso else [],
+        error=error,
+    )
+
+
+@app.route("/admin/qso-label/pdf")
+@admin_required
+def admin_qso_label_pdf():
+    qso_id = _parse_int(request.args.get("qso_id"), default=0)
+    position = labels.clamp_position(_parse_int(request.args.get("position"), default=1))
+    if not qso_id:
+        abort(400)
+
+    try:
+        qso = photomap_store.get_my_qso(qso_id)
+    except S3Error as exc:
+        logger.warning("QSO label S3 error: %s", exc)
+        abort(502)
+
+    if qso is None:
+        abort(404)
+
+    pdf_bytes = labels.generate_qso_avery_5163_pdf(qso, position)
+    filename = f"qso-label-{qso['callsign']}-{qso.get('qso_date', '')}.pdf"
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
 @app.route("/admin/photomap/import-adif", methods=["GET", "POST"])
 @admin_required
 def admin_import_adif():
@@ -522,11 +601,14 @@ def admin_import_adif():
 
         qsos = parse_adif(text)
         try:
-            added = photomap_store.import_my_qsos(qsos)
+            added, backfilled = photomap_store.import_my_qsos(qsos)
         except S3Error as exc:
             flash(s3_config_hint(exc), "error")
             return redirect(url_for("admin_import_adif"))
-        flash(f"Imported {added} new QSO record(s) ({len(qsos)} found in the file).", "success")
+        message = f"Imported {added} new QSO record(s) ({len(qsos)} found in the file)."
+        if backfilled:
+            message += f" Backfilled a UTC time onto {backfilled} already-imported record(s)."
+        flash(message, "success")
         return redirect(url_for("admin_import_adif"))
 
     try:
