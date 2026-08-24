@@ -597,6 +597,7 @@ def admin_qso_label():
     qso = None
     error = None
     recent = []
+    recent_note = None
 
     if not QRZ_LOGBOOK_API_KEY:
         error = "QRZ Logbook API isn't configured yet (QRZ_LOGBOOK_API_KEY isn't set on the server)."
@@ -615,12 +616,26 @@ def admin_qso_label():
                 "behind the website -- try again shortly. The list below shows what your "
                 "API key can see right now, in case it's under a slightly different call."
             )
-            # Diagnostic only -- if this itself fails, just skip showing
-            # it rather than clobbering the more useful error above.
+            # Diagnostic -- surface exactly what happened (empty-but-OK vs.
+            # an outright failure) rather than just logging it server-side,
+            # since Josh can't see Render's logs from the page itself.
             try:
                 recent = _fetch_recent_qsos()
+                if not recent:
+                    recent_note = (
+                        "Checked: your API key shows zero QSOs logged in the last 30 days, "
+                        "under ANY callsign. If that doesn't match what you see on QRZ's own "
+                        "logbook page, this API key is most likely scoped to a different "
+                        "logbook/callsign than the one you're viewing on qrz.com -- worth "
+                        "checking Logbook -> Settings -> API on QRZ to confirm which logbook "
+                        "this key belongs to."
+                    )
+            except QrzLogbookError as exc:
+                logger.warning("QRZ Logbook recent-QSO diagnostic fetch failed: %s", exc)
+                recent_note = f"Couldn't check recent QSOs either -- QRZ said: {exc}"
             except Exception as exc:
                 logger.warning("QRZ Logbook recent-QSO diagnostic fetch failed: %s", exc)
+                recent_note = f"Couldn't check recent QSOs either ({type(exc).__name__}: {exc})."
         elif not error and qso_key:
             qso = next((m for m in matches if m["key"] == qso_key), None)
             if qso is None:
@@ -640,6 +655,7 @@ def admin_qso_label():
         qso_label_lines=labels.qso_label_lines(qso) if qso else [],
         error=error,
         recent=recent,
+        recent_note=recent_note,
     )
 
 
