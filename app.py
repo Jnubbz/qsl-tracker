@@ -667,7 +667,12 @@ def admin_qso_label():
                 # full match table again.
                 matches = []
 
-    return render_template(
+    # This page hits QRZ's live Logbook API on every load -- caching it
+    # (browser back/forward cache, a shared proxy, etc.) risks showing a
+    # stale "not found" result even after the underlying QRZ data has
+    # changed, which is exactly the kind of confusion this route can't
+    # afford given how much of it depends on being genuinely live.
+    response = Response(render_template(
         "admin_qso_label.html",
         callsign=callsign,
         position=position,
@@ -681,7 +686,9 @@ def admin_qso_label():
         debug=debug,
         raw_call=raw_call,
         raw_recent=raw_recent,
-    )
+    ))
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.route("/admin/qso-label/pdf")
