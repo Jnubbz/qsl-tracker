@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Print Mailing Label{% endblock %}
+{% block title %}Print QSL Label{% endblock %}
 {% block content %}
   <section class="card">
     <div class="dashboard-top">
@@ -13,9 +13,7 @@
       file for a direct card, get a print-ready PDF sized for one cell of an
       Avery 5163 / 8163 / 18163 sheet (2"&times;4", 10 per page, 2 columns
       &times; 5 rows). Only the position you pick gets filled in, so you can
-      keep using a partially-used sheet. Looking for QSO details (band,
-      mode, RST) to stick on the card itself instead?
-      <a href="{{ url_for('admin_qso_label') }}">Print a QSO label</a>.
+      keep using a partially-used sheet.
     </p>
 
     <form method="get" action="{{ url_for('admin_label') }}" id="label-form">

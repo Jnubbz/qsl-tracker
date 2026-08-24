@@ -15,8 +15,7 @@
       <a href="{{ url_for('index') }}">Dashboard</a>
       <a href="{{ url_for('photomap') }}">QSL Photo Map</a>
       {% if session.get('is_admin') %}
-        <a href="{{ url_for('admin_label') }}">Print Mailing Label</a>
-        <a href="{{ url_for('admin_qso_label') }}">Print QSO Label</a>
+        <a href="{{ url_for('admin_label') }}">Print QSL Label</a>
       {% endif %}
     </nav>
   </header>
