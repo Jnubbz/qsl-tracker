@@ -612,15 +612,19 @@ def admin_qso_label():
     elif callsign:
         # Wall-clock timing, not just an attempt count, so a diagnostic
         # session can report exactly how many seconds elapsed before
-        # (or whether) QRZ started answering correctly -- three rounds
-        # of guessing a bigger retry *count* (2, then 4 attempts) each
+        # (or whether) QRZ started answering correctly -- two rounds of
+        # guessing a bigger retry *count* (2, then 4 attempts) each
         # turned out insufficient, and each time the debug view's own
-        # follow-up attempts found the QSO anyway, just later. Without
-        # real elapsed-time numbers, widening the count again is still
-        # a guess; with them, the actual required wait time can be
-        # measured directly instead of estimated from attempt counts
-        # and a nominal (but not always accurate, under real network
-        # latency) sleep duration.
+        # follow-up attempts found the QSO anyway, just later. A
+        # 2026-08-24 measurement using this instrumentation finally
+        # pinned down a real number: with the 4-retry window (5 total
+        # attempts, ~6-7s of sleep) exhausted and failing, the very
+        # first post-retry debug attempt succeeded at t=+7.4s since page
+        # load -- meaning the true recovery point was only a second or
+        # so past where the retry window cut off. RETRY_COUNT below is
+        # sized to roughly double that measured 7.4s (~12s of sleep
+        # alone, ~14-16s including request latency) for real margin
+        # instead of another tight guess.
         fetch_start = time.time()
 
         def _elapsed():
@@ -634,19 +638,14 @@ def admin_qso_label():
             error = "Couldn't reach QRZ's Logbook API right now. Try again in a moment."
 
         # Retry several times (short pause between) before concluding
-        # "not found". A 2026-08-24 debug session proved QRZ's Logbook
-        # API can answer the exact same CALL:<callsign> request
-        # inconsistently between near-simultaneous calls: the very first
-        # fetch on a page load came back with zero matches, then several
-        # more identical fetches came back with the same real, correct
-        # QSO. Two successive tunings of this (2 retries, then 4) each
-        # turned out not to be enough margin -- see `timing_note` below
-        # and the debug view's per-attempt timestamps for the real
-        # numbers once available. This costs time only in that
+        # "not found" -- see the timing comment above for how this
+        # count was derived from a real measured recovery time (7.4s)
+        # rather than another guess. This costs time only in that
         # apparently-not-rare case; a search that finds something on the
         # first try never touches this loop.
+        RETRY_COUNT = 8
         if not error and not matches:
-            for _ in range(4):
+            for _ in range(RETRY_COUNT):
                 time.sleep(1.5)
                 try:
                     matches = _fetch_qso_matches(callsign)
@@ -663,7 +662,7 @@ def admin_qso_label():
         if not error and not matches:
             timing_note = (
                 f"The primary search plus its retries took {_elapsed()}s total "
-                "(5 attempts, all came back empty) before giving up."
+                f"({RETRY_COUNT + 1} attempts, all came back empty) before giving up."
             )
             error = (
                 f"No logged QSO with {callsign} found in your QRZ Logbook via the API. "
