@@ -32,6 +32,35 @@
     </section>
   {% endif %}
 
+  {% if recent %}
+    <section class="card">
+      <h1>Most recent QSOs your API key can see</h1>
+      <p class="muted">
+        Last 30 days, any callsign &mdash; a quick sanity check on what QRZ's
+        Logbook API is actually returning right now. If today's QSO shows up
+        here under a slightly different call (a portable suffix, for
+        example), select it directly below.
+      </p>
+      <table class="contacts">
+        <thead>
+          <tr><th>Callsign</th><th>Date</th><th>Time (UTC)</th><th>Band / Mode</th><th>Freq</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for r in recent %}
+            <tr>
+              <td>{{ r['callsign'] }}</td>
+              <td>{{ r['qso_date'] or '-' }}</td>
+              <td>{{ r['time_on'] or '-' }}</td>
+              <td>{{ [r['band'], r['mode']] | select | join(' / ') or '-' }}</td>
+              <td>{{ r['freq'] or '-' }}</td>
+              <td><a href="{{ url_for('admin_qso_label', callsign=r['callsign'], qso_key=r['key'], position=position) }}">Select</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  {% endif %}
+
   {% if matches %}
     <section class="card">
       <h1>{{ matches | length }} logged QSO{{ 's' if matches | length != 1 else '' }} with {{ callsign }}</h1>

@@ -31,6 +31,7 @@ from qrz import (
     QrzError,
     QrzLogbookError,
     fetch_logged_qsos,
+    fetch_recent_qsos,
     format_mailing_label,
     get_session_key,
     lookup_callsign,
@@ -530,13 +531,11 @@ def _qso_key(qso: dict) -> str:
     ])
 
 
-def _fetch_qso_matches(callsign: str) -> list[dict]:
-    """Every QSO with `callsign` in Josh's own QRZ Logbook, newest
-    first, shaped the same way the old ADIF-import store used to
-    (qso_date/time_on/band/mode/freq/rst_sent/rst_rcvd) plus a `key`
-    for _qso_key() above. Raises QrzLogbookError if the API rejects the
-    request (e.g. a bad/missing key)."""
-    adif_text = fetch_logged_qsos(QRZ_LOGBOOK_API_KEY, callsign)
+def _rows_from_adif(adif_text: str) -> list[dict]:
+    """Turn QRZ Logbook API ADIF text into the row shape the old
+    ADIF-import store used to produce (qso_date/time_on/band/mode/freq/
+    rst_sent/rst_rcvd) plus a `key` for _qso_key() above, newest first.
+    Shared by _fetch_qso_matches() and _fetch_recent_qsos() below."""
     rows = []
     for qso in parse_adif(adif_text):
         f = qso.fields
@@ -554,6 +553,22 @@ def _fetch_qso_matches(callsign: str) -> list[dict]:
         rows.append(row)
     rows.sort(key=lambda r: (r.get("qso_date") or "", r.get("time_on") or ""), reverse=True)
     return rows
+
+
+def _fetch_qso_matches(callsign: str) -> list[dict]:
+    """Every QSO with `callsign` in Josh's own QRZ Logbook, newest
+    first. Raises QrzLogbookError if the API rejects the request (e.g.
+    a bad/missing key)."""
+    return _rows_from_adif(fetch_logged_qsos(QRZ_LOGBOOK_API_KEY, callsign))
+
+
+def _fetch_recent_qsos(days: int = 30, max_results: int = 25) -> list[dict]:
+    """Diagnostic fallback for admin_qso_label(): the last `days` days
+    of QSOs under ANY callsign, regardless of the CALL: filter -- see
+    qrz.fetch_recent_qsos() for why. Raises QrzLogbookError the same way
+    _fetch_qso_matches() does; callers should decide whether to surface
+    that or just quietly skip showing the diagnostic list."""
+    return _rows_from_adif(fetch_recent_qsos(QRZ_LOGBOOK_API_KEY, days, max_results))
 
 
 @app.route("/admin/qso-label")
@@ -581,6 +596,7 @@ def admin_qso_label():
     matches = []
     qso = None
     error = None
+    recent = []
 
     if not QRZ_LOGBOOK_API_KEY:
         error = "QRZ Logbook API isn't configured yet (QRZ_LOGBOOK_API_KEY isn't set on the server)."
@@ -593,7 +609,18 @@ def admin_qso_label():
             error = "Couldn't reach QRZ's Logbook API right now. Try again in a moment."
 
         if not error and not matches:
-            error = f"No logged QSO with {callsign} found in your QRZ Logbook."
+            error = (
+                f"No logged QSO with {callsign} found in your QRZ Logbook via the API. "
+                "If you just logged this, QRZ's API can occasionally lag a few minutes "
+                "behind the website -- try again shortly. The list below shows what your "
+                "API key can see right now, in case it's under a slightly different call."
+            )
+            # Diagnostic only -- if this itself fails, just skip showing
+            # it rather than clobbering the more useful error above.
+            try:
+                recent = _fetch_recent_qsos()
+            except Exception as exc:
+                logger.warning("QRZ Logbook recent-QSO diagnostic fetch failed: %s", exc)
         elif not error and qso_key:
             qso = next((m for m in matches if m["key"] == qso_key), None)
             if qso is None:
@@ -612,6 +639,7 @@ def admin_qso_label():
         qso=qso,
         qso_label_lines=labels.qso_label_lines(qso) if qso else [],
         error=error,
+        recent=recent,
     )
 
 

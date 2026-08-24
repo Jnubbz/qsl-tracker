@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from datetime import date, timedelta
 
 import requests
 
@@ -259,29 +260,18 @@ def lookup_location(session_key: str, callsign: str) -> QrzLocation:
     )
 
 
-def fetch_logged_qsos(api_key: str, callsign: str, max_results: int = 250) -> str:
-    """FETCH every QSO with `callsign` from Josh's own QRZ Logbook, and
-    return the raw ADIF text -- feed it straight into
-    `adif.parse_adif()`, which already handles arbitrary ADIF tags
-    generically. Raises QrzLogbookError on a non-OK RESULT, a request
-    that fails outright, or a response that doesn't look like this
-    API's format at all.
-
-    The response body is name=value pairs joined with "&"
-    (RESULT=OK&COUNT=2&LOGIDS=...&ADIF=...), but -- unlike a normal
-    query string -- QRZ doesn't reliably percent-encode the ADIF field,
-    which can itself contain a literal "&" (e.g. inside a COMMENT).
-    Naively splitting the whole body on "&" would corrupt that. QRZ's
-    docs order the response RESULT, COUNT, LOGIDS, ADIF with ADIF
-    always last, so this finds the "ADIF=" marker and takes everything
-    after it as one raw string instead of a field-by-field split.
-    """
+def _fetch(api_key: str, option: str) -> str:
+    """POST one FETCH request to the Logbook API with a given OPTION
+    string and return the raw ADIF text. Shared by fetch_logged_qsos()
+    and fetch_recent_qsos() below -- see fetch_logged_qsos()'s docstring
+    for why the response has to be parsed by locating the "ADIF=" marker
+    instead of a naive "&"-split."""
     resp = requests.post(
         QRZ_LOGBOOK_API_URL,
         data={
             "KEY": api_key,
             "ACTION": "FETCH",
-            "OPTION": f"CALL:{callsign},MAX:{max_results}",
+            "OPTION": option,
         },
         headers={"User-Agent": QRZ_LOGBOOK_USER_AGENT},
         timeout=10,
@@ -304,3 +294,45 @@ def fetch_logged_qsos(api_key: str, callsign: str, max_results: int = 250) -> st
         return ""
 
     return adif_text
+
+
+def fetch_logged_qsos(api_key: str, callsign: str, max_results: int = 250) -> str:
+    """FETCH every QSO with `callsign` from Josh's own QRZ Logbook, and
+    return the raw ADIF text -- feed it straight into
+    `adif.parse_adif()`, which already handles arbitrary ADIF tags
+    generically. Raises QrzLogbookError on a non-OK RESULT, a request
+    that fails outright, or a response that doesn't look like this
+    API's format at all.
+
+    The response body is name=value pairs joined with "&"
+    (RESULT=OK&COUNT=2&LOGIDS=...&ADIF=...), but -- unlike a normal
+    query string -- QRZ doesn't reliably percent-encode the ADIF field,
+    which can itself contain a literal "&" (e.g. inside a COMMENT).
+    Naively splitting the whole body on "&" would corrupt that. QRZ's
+    docs order the response RESULT, COUNT, LOGIDS, ADIF with ADIF
+    always last, so this finds the "ADIF=" marker and takes everything
+    after it as one raw string instead of a field-by-field split.
+    """
+    return _fetch(api_key, f"CALL:{callsign},MAX:{max_results}")
+
+
+def fetch_recent_qsos(api_key: str, days: int = 30, max_results: int = 25) -> str:
+    """FETCH the most recent QSOs logged under ANY callsign in the last
+    `days` days -- no CALL: filter at all. This is a diagnostic used by
+    admin_qso_label() when a CALL-filtered fetch_logged_qsos() comes up
+    empty for a callsign Josh is sure he's logged: it shows what the API
+    key can actually see right now, so a "logged under a slightly
+    different callsign format", a "QRZ's API hasn't caught up with the
+    website yet", and a genuine "it's just not there" can be told apart.
+
+    Deliberately uses BETWEEN: for the date-range scope rather than
+    QRZ's ALL keyword -- the docs say "When the option ALL is given,
+    only the options TYPE and STATUS may also be specified", which reads
+    as ALL *not* being combinable with MAX. BETWEEN is an ordinary scope
+    filter with no such restriction, so BETWEEN+MAX avoids that
+    ambiguity entirely while still capping the result size.
+    """
+    end = date.today()
+    start = end - timedelta(days=days)
+    option = f"BETWEEN:{start.isoformat()}+{end.isoformat()},MAX:{max_results}"
+    return _fetch(api_key, option)
