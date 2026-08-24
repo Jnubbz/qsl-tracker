@@ -63,6 +63,31 @@
       {% if recent_note %}
         <p class="flag-missing">{{ recent_note }}</p>
       {% endif %}
+      {% if not debug %}
+        <p class="muted">
+          <a href="{{ url_for('admin_qso_label', callsign=callsign, debug=1) }}">Show the raw, unparsed QRZ API response (debug)</a>
+          &mdash; if you're confident your API key/logbook setup is correct, this shows exactly what QRZ sent back instead of asking you to trust the summary above.
+        </p>
+      {% endif %}
+    </section>
+  {% endif %}
+
+  {% if debug and (raw_call or raw_recent) %}
+    <section class="card">
+      <h1>Raw QRZ API responses (debug)</h1>
+      <p class="muted">
+        Completely unparsed -- exactly what QRZ's Logbook API sent back for
+        each request, before any of this app's own RESULT/ADIF
+        interpretation.
+      </p>
+      {% if raw_call %}
+        <p><strong>CALL:{{ callsign }} request:</strong></p>
+        <pre style="white-space: pre-wrap; word-break: break-word; background: rgba(0,0,0,0.25); padding: 0.75rem; border-radius: 6px;">{{ raw_call }}</pre>
+      {% endif %}
+      {% if raw_recent %}
+        <p><strong>Last-30-days (no callsign filter) request:</strong></p>
+        <pre style="white-space: pre-wrap; word-break: break-word; background: rgba(0,0,0,0.25); padding: 0.75rem; border-radius: 6px;">{{ raw_recent }}</pre>
+      {% endif %}
     </section>
   {% endif %}
 

@@ -30,12 +30,15 @@ from mailer import send_qsl_request_email
 from qrz import (
     QrzError,
     QrzLogbookError,
+    call_option,
     fetch_logged_qsos,
+    fetch_raw,
     fetch_recent_qsos,
     format_mailing_label,
     get_session_key,
     lookup_callsign,
     lookup_location,
+    recent_option,
 )
 from s3 import S3Error, delete_object, get_object_bytes, upload_card_image
 
@@ -593,11 +596,15 @@ def admin_qso_label():
     qso_key = request.args.get("qso_key", "")
     position = labels.clamp_qso_position(_parse_int(request.args.get("position"), default=1))
 
+    debug = request.args.get("debug") == "1"
+
     matches = []
     qso = None
     error = None
     recent = []
     recent_note = None
+    raw_call = None
+    raw_recent = None
 
     if not QRZ_LOGBOOK_API_KEY:
         error = "QRZ Logbook API isn't configured yet (QRZ_LOGBOOK_API_KEY isn't set on the server)."
@@ -636,6 +643,21 @@ def admin_qso_label():
             except Exception as exc:
                 logger.warning("QRZ Logbook recent-QSO diagnostic fetch failed: %s", exc)
                 recent_note = f"Couldn't check recent QSOs either ({type(exc).__name__}: {exc})."
+
+            # Raw-response debug view, opt-in via ?debug=1 -- shows the
+            # literal, completely unparsed bytes QRZ sent back for both
+            # requests, so a "the API genuinely has nothing" conclusion
+            # can be checked against the actual response rather than
+            # this module's interpretation of it.
+            if debug:
+                try:
+                    raw_call = fetch_raw(QRZ_LOGBOOK_API_KEY, call_option(callsign))
+                except Exception as exc:
+                    raw_call = f"(raw fetch itself failed: {type(exc).__name__}: {exc})"
+                try:
+                    raw_recent = fetch_raw(QRZ_LOGBOOK_API_KEY, recent_option())
+                except Exception as exc:
+                    raw_recent = f"(raw fetch itself failed: {type(exc).__name__}: {exc})"
         elif not error and qso_key:
             qso = next((m for m in matches if m["key"] == qso_key), None)
             if qso is None:
@@ -656,6 +678,9 @@ def admin_qso_label():
         error=error,
         recent=recent,
         recent_note=recent_note,
+        debug=debug,
+        raw_call=raw_call,
+        raw_recent=raw_recent,
     )
 
 

@@ -260,12 +260,14 @@ def lookup_location(session_key: str, callsign: str) -> QrzLocation:
     )
 
 
-def _fetch(api_key: str, option: str) -> str:
+def _post(api_key: str, option: str) -> str:
     """POST one FETCH request to the Logbook API with a given OPTION
-    string and return the raw ADIF text. Shared by fetch_logged_qsos()
-    and fetch_recent_qsos() below -- see fetch_logged_qsos()'s docstring
-    for why the response has to be parsed by locating the "ADIF=" marker
-    instead of a naive "&"-split."""
+    string and return the response body completely unparsed -- no
+    RESULT/ADIF interpretation at all. Shared by _fetch() (below) and
+    by fetch_raw() (also below), which exists purely so
+    admin_qso_label()'s debug view can show Josh the literal bytes QRZ
+    sent back, in case this module's own parsing of them is ever in
+    question."""
     resp = requests.post(
         QRZ_LOGBOOK_API_URL,
         data={
@@ -277,7 +279,16 @@ def _fetch(api_key: str, option: str) -> str:
         timeout=10,
     )
     resp.raise_for_status()
-    text = resp.text
+    return resp.text
+
+
+def _fetch(api_key: str, option: str) -> str:
+    """POST one FETCH request and return the raw ADIF text, parsed out
+    of QRZ's RESULT=...&ADIF=... response. Shared by fetch_logged_qsos()
+    and fetch_recent_qsos() below -- see fetch_logged_qsos()'s docstring
+    for why the response has to be parsed by locating the "ADIF=" marker
+    instead of a naive "&"-split."""
+    text = _post(api_key, option)
 
     head, marker, adif_text = text.partition("ADIF=")
     head_fields = dict(
@@ -313,7 +324,16 @@ def fetch_logged_qsos(api_key: str, callsign: str, max_results: int = 250) -> st
     always last, so this finds the "ADIF=" marker and takes everything
     after it as one raw string instead of a field-by-field split.
     """
-    return _fetch(api_key, f"CALL:{callsign},MAX:{max_results}")
+    return _fetch(api_key, call_option(callsign, max_results))
+
+
+def call_option(callsign: str, max_results: int = 250) -> str:
+    """The exact OPTION string fetch_logged_qsos() sends. Exposed (not
+    just inlined into fetch_logged_qsos()) so admin_qso_label()'s
+    raw-response debug view -- see fetch_raw() below -- can ask for
+    precisely the same request fetch_logged_qsos() makes, without a
+    second, easy-to-drift copy of this format string."""
+    return f"CALL:{callsign},MAX:{max_results}"
 
 
 def fetch_recent_qsos(api_key: str, days: int = 30, max_results: int = 25) -> str:
@@ -332,7 +352,23 @@ def fetch_recent_qsos(api_key: str, days: int = 30, max_results: int = 25) -> st
     filter with no such restriction, so BETWEEN+MAX avoids that
     ambiguity entirely while still capping the result size.
     """
+    return _fetch(api_key, recent_option(days, max_results))
+
+
+def recent_option(days: int = 30, max_results: int = 25) -> str:
+    """The exact OPTION string fetch_recent_qsos() sends -- see
+    call_option() above for why this is exposed rather than
+    duplicated."""
     end = date.today()
     start = end - timedelta(days=days)
-    option = f"BETWEEN:{start.isoformat()}+{end.isoformat()},MAX:{max_results}"
-    return _fetch(api_key, option)
+    return f"BETWEEN:{start.isoformat()}+{end.isoformat()},MAX:{max_results}"
+
+
+def fetch_raw(api_key: str, option: str) -> str:
+    """The literal, completely unparsed response body QRZ returns for a
+    given OPTION string -- bypasses all RESULT/ADIF interpretation.
+    Debug-only: lets admin_qso_label()'s debug view show Josh exactly
+    what QRZ sent back for a request, rather than asking him to trust
+    this module's own parsing of it (RESULT/COUNT/ADIF extraction) sight
+    unseen."""
+    return _post(api_key, option)
