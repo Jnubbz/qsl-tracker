@@ -1,11 +1,24 @@
 """
-Minimal client for the QRZ.com XML Logbook Data API.
+Minimal client for two separate QRZ.com APIs:
 
-QRZ's XML API is a paid ("XML" subscriber) feature. A visitor supplies
-their own QRZ username/password; we exchange those for a short-lived
-session key and never persist the password itself.
+  * The **XML Logbook Data API** (`xmldata.qrz.com`) -- a paid ("XML"
+    subscriber) feature. A visitor supplies their own QRZ
+    username/password; we exchange those for a short-lived session key
+    and never persist the password itself. Used for looking up a
+    station's own profile (name/address/grid) -- `lookup_callsign()`,
+    `lookup_location()`.
+    Docs: https://www.qrz.com/XML/current_spec.html
 
-Docs: https://www.qrz.com/XML/current_spec.html
+  * The **Logbook API** (`logbook.qrz.com/api`) -- a different QRZ
+    product with its own authentication: a static per-logbook API key
+    (from a QRZ account's Logbook -> Settings -> API page), not a
+    username/password session. Used for pulling the actual QSOs in
+    Josh's own QRZ Logbook -- `fetch_logged_qsos()`. Requires the
+    logbook owner's account to be at the XML subscriber level or
+    higher (same tier the XML API above needs), but the two APIs don't
+    share a session -- this one's key is a standing secret, not
+    something a visitor logs in with.
+    Docs: https://www.qrz.com/docs/logbook/QRZLogbookAPI.html
 """
 from __future__ import annotations
 
@@ -17,9 +30,19 @@ import requests
 QRZ_XML_URL = "https://xmldata.qrz.com/xml/current/"
 NS = {"qrz": "http://xmldata.qrz.com"}
 
+QRZ_LOGBOOK_API_URL = "https://logbook.qrz.com/api"
+# QRZ's own docs note generic user agents (e.g. the requests library's
+# default) "may face rate limiting" -- an identifiable one avoids that.
+QRZ_LOGBOOK_USER_AGENT = "qsl-tracker (https://github.com/Jnubbz/qsl-tracker)"
+
 
 class QrzError(Exception):
     """Raised when QRZ rejects a login or a lookup."""
+
+
+class QrzLogbookError(QrzError):
+    """Raised when the QRZ Logbook API rejects a FETCH (bad/missing API
+    key, or a non-OK RESULT)."""
 
 
 def format_mailing_label(
@@ -234,3 +257,50 @@ def lookup_location(session_key: str, callsign: str) -> QrzLocation:
         lat=_float("lat"),
         lon=_float("lon"),
     )
+
+
+def fetch_logged_qsos(api_key: str, callsign: str, max_results: int = 250) -> str:
+    """FETCH every QSO with `callsign` from Josh's own QRZ Logbook, and
+    return the raw ADIF text -- feed it straight into
+    `adif.parse_adif()`, which already handles arbitrary ADIF tags
+    generically. Raises QrzLogbookError on a non-OK RESULT, a request
+    that fails outright, or a response that doesn't look like this
+    API's format at all.
+
+    The response body is name=value pairs joined with "&"
+    (RESULT=OK&COUNT=2&LOGIDS=...&ADIF=...), but -- unlike a normal
+    query string -- QRZ doesn't reliably percent-encode the ADIF field,
+    which can itself contain a literal "&" (e.g. inside a COMMENT).
+    Naively splitting the whole body on "&" would corrupt that. QRZ's
+    docs order the response RESULT, COUNT, LOGIDS, ADIF with ADIF
+    always last, so this finds the "ADIF=" marker and takes everything
+    after it as one raw string instead of a field-by-field split.
+    """
+    resp = requests.post(
+        QRZ_LOGBOOK_API_URL,
+        data={
+            "KEY": api_key,
+            "ACTION": "FETCH",
+            "OPTION": f"CALL:{callsign},MAX:{max_results}",
+        },
+        headers={"User-Agent": QRZ_LOGBOOK_USER_AGENT},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    text = resp.text
+
+    head, marker, adif_text = text.partition("ADIF=")
+    head_fields = dict(
+        pair.split("=", 1) for pair in head.rstrip("&").split("&") if "=" in pair
+    )
+
+    result = head_fields.get("RESULT", "")
+    if result == "AUTH":
+        raise QrzLogbookError("QRZ rejected the Logbook API key (check QRZ_LOGBOOK_API_KEY).")
+    if result != "OK":
+        raise QrzLogbookError(f"QRZ Logbook FETCH failed: {text[:200] or 'empty response'}")
+    if not marker:
+        # RESULT=OK but no ADIF field at all -- zero QSOs matched.
+        return ""
+
+    return adif_text

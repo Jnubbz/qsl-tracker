@@ -9,13 +9,13 @@
       </form>
     </div>
     <p class="muted">
-      Pulls from your own imported ADIF log (never QRZ) so you get callsign,
-      date/time in UTC, band/mode/freq, and RST sent/received on a print-ready
-      label sized for one cell of an Avery 5163 / 8163 / 18163 sheet (2"&times;4",
-      10 per page) &mdash; meant to be stuck onto the blank 2"&times;4" spot on
-      the card itself instead of hand-written. No log imported yet, or a QSO
-      missing here? <a href="{{ url_for('admin_import_adif') }}">Import/refresh
-      your ADIF log</a>. Looking for a mailing-address label instead?
+      Pulls live from your QRZ Logbook (never an imported file) so you get
+      callsign, date/time in UTC, band/mode/freq, and RST sent/received on a
+      print-ready label sized for one cell of an Avery 5163 / 8163 / 18163
+      sheet (2"&times;4", 10 per page) &mdash; meant to be stuck onto the blank
+      2"&times;4" spot on the card itself instead of hand-written. A QSO
+      missing here just means it isn't in your QRZ Logbook yet. Looking for a
+      mailing-address label instead?
       <a href="{{ url_for('admin_label') }}">Print a QSL mailing label</a>.
     </p>
 
@@ -48,7 +48,7 @@
               <td>{{ [m['band'], m['mode']] | select | join(' / ') or '-' }}</td>
               <td>{{ m['freq'] or '-' }}</td>
               <td>{{ m['rst_sent'] or '-' }} / {{ m['rst_rcvd'] or '-' }}</td>
-              <td><a href="{{ url_for('admin_qso_label', callsign=callsign, qso_id=m['id'], position=position) }}">Select</a></td>
+              <td><a href="{{ url_for('admin_qso_label', callsign=callsign, qso_key=m['key'], position=position) }}">Select</a></td>
             </tr>
           {% endfor %}
         </tbody>
@@ -67,7 +67,7 @@
 
       <form method="get" action="{{ url_for('admin_qso_label') }}" style="margin-top: 1rem;">
         <input type="hidden" name="callsign" value="{{ callsign }}">
-        <input type="hidden" name="qso_id" value="{{ qso['id'] }}">
+        <input type="hidden" name="qso_key" value="{{ qso['key'] }}">
         <label for="position">Sheet position (1&ndash;{{ label_count }}, left-to-right, top-to-bottom)</label>
         <select id="position" name="position">
           {% for i in range(1, label_count + 1) %}
@@ -81,7 +81,7 @@
         Position {{ position }} of {{ label_count }} on the Avery 5163/8163/18163 layout.
       </p>
       <a class="button-link"
-         href="{{ url_for('admin_qso_label_pdf', qso_id=qso['id'], position=position) }}"
+         href="{{ url_for('admin_qso_label_pdf', callsign=callsign, qso_key=qso['key'], position=position) }}"
          target="_blank" rel="noopener">Download PDF label</a>
       &nbsp;
       <a href="{{ url_for('admin_qso_label', callsign=callsign) }}">Pick a different QSO with {{ callsign }}</a>

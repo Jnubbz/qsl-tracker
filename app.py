@@ -27,7 +27,15 @@ import labels
 import photomap_store
 from adif import distinct_callsigns, parse_adif
 from mailer import send_qsl_request_email
-from qrz import QrzError, format_mailing_label, get_session_key, lookup_callsign, lookup_location
+from qrz import (
+    QrzError,
+    QrzLogbookError,
+    fetch_logged_qsos,
+    format_mailing_label,
+    get_session_key,
+    lookup_callsign,
+    lookup_location,
+)
 from s3 import S3Error, delete_object, get_object_bytes, upload_card_image
 
 # Without this, mailer.py's logger.warning()/logger.exception() calls for
@@ -79,6 +87,13 @@ QSL_REQUEST_RATE_WINDOW_SECONDS = 600
 # anonymous; this is one person's admin area). Unset in an environment
 # that hasn't configured it yet -- see admin_login() below.
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+
+# The QRZ Logbook API's own per-logbook access key (from Josh's QRZ
+# account: Logbook -> Settings -> API) -- a completely different secret
+# from the QRZ username/password the admin-login/dashboard flows use.
+# Powers the QSO-label page's live fetch straight from Josh's QRZ
+# Logbook -- see qrz.fetch_logged_qsos() and admin_qso_label() below.
+QRZ_LOGBOOK_API_KEY = os.environ.get("QRZ_LOGBOOK_API_KEY", "")
 
 
 @app.before_request
@@ -501,46 +516,92 @@ def _parse_int(raw: str | None, default: int) -> int:
         return default
 
 
+def _qso_key(qso: dict) -> str:
+    """A stable-enough identifier for one QSO within a single callsign's
+    match list, used instead of a database id -- there's no persisted
+    store to hand one out anymore (see admin_qso_label() below), so the
+    "which QSO did you pick" step re-fetches from QRZ and re-matches by
+    this composite of date/time/band/mode/freq instead. Two QSOs with
+    the same callsign colliding on all five of those is not realistic
+    for a ham log."""
+    return "|".join([
+        qso.get("qso_date", ""), qso.get("time_on", ""), qso.get("band", ""),
+        qso.get("mode", ""), qso.get("freq", ""),
+    ])
+
+
+def _fetch_qso_matches(callsign: str) -> list[dict]:
+    """Every QSO with `callsign` in Josh's own QRZ Logbook, newest
+    first, shaped the same way the old ADIF-import store used to
+    (qso_date/time_on/band/mode/freq/rst_sent/rst_rcvd) plus a `key`
+    for _qso_key() above. Raises QrzLogbookError if the API rejects the
+    request (e.g. a bad/missing key)."""
+    adif_text = fetch_logged_qsos(QRZ_LOGBOOK_API_KEY, callsign)
+    rows = []
+    for qso in parse_adif(adif_text):
+        f = qso.fields
+        row = {
+            "callsign": qso.callsign,
+            "qso_date": f.get("qso_date", ""),
+            "time_on": f.get("time_on", ""),
+            "band": f.get("band", "").upper(),
+            "mode": f.get("mode", "").upper(),
+            "freq": f.get("freq", ""),
+            "rst_sent": f.get("rst_sent", ""),
+            "rst_rcvd": f.get("rst_rcvd", ""),
+        }
+        row["key"] = _qso_key(row)
+        rows.append(row)
+    rows.sort(key=lambda r: (r.get("qso_date") or "", r.get("time_on") or ""), reverse=True)
+    return rows
+
+
 @app.route("/admin/qso-label")
 @admin_required
 def admin_qso_label():
     """Print a label of one of Josh's own logged QSOs (callsign,
     date/time in UTC, band/mode/freq, RST sent/received) -- meant to be
     stuck onto a blank 2"x4" spot on the physical QSL card instead of
-    hand-written. Pulled entirely from the ADIF-imported `my_qsos` store
-    (see photomap_store.py) -- never QRZ, which only knows a station's
-    own profile, not the specifics of a contact with them.
+    hand-written. Fetched live from Josh's own QRZ Logbook via the QRZ
+    Logbook API (see qrz.fetch_logged_qsos()) -- never the XML Data API
+    used elsewhere in this app, which only knows a station's own
+    profile, not the specifics of a contact with them. Needs
+    QRZ_LOGBOOK_API_KEY configured; doesn't need or use a visitor QRZ
+    login/session at all -- the Logbook API's key is a standing secret,
+    not a per-visitor credential.
 
     A callsign can have several logged QSOs (repeat contacts, different
     bands/dates), so this is a two-step page: first pick a callsign and
-    see the matches, then pick the specific QSO (`qso_id`) to preview
+    see the matches, then pick the specific QSO (`qso_key`) to preview
     and print."""
     callsign = request.args.get("callsign", "").strip().upper()
-    qso_id = _parse_int(request.args.get("qso_id"), default=0)
+    qso_key = request.args.get("qso_key", "")
     position = labels.clamp_qso_position(_parse_int(request.args.get("position"), default=1))
 
     matches = []
     qso = None
     error = None
 
-    if qso_id:
-        try:
-            qso = photomap_store.get_my_qso(qso_id)
-        except S3Error as exc:
-            flash(s3_config_hint(exc), "error")
-            return redirect(url_for("admin_qso_label"))
-        if qso is None:
-            error = "That logged QSO no longer exists."
-        else:
-            callsign = qso["callsign"]
+    if not QRZ_LOGBOOK_API_KEY:
+        error = "QRZ Logbook API isn't configured yet (QRZ_LOGBOOK_API_KEY isn't set on the server)."
     elif callsign:
         try:
-            matches = photomap_store.find_my_qsos(callsign)
-        except S3Error as exc:
-            flash(s3_config_hint(exc), "error")
-            return redirect(url_for("admin_qso_label"))
-        if not matches:
-            error = f"No logged QSO with {callsign} found in your imported ADIF log."
+            matches = _fetch_qso_matches(callsign)
+        except QrzLogbookError as exc:
+            error = str(exc)
+        except Exception:
+            error = "Couldn't reach QRZ's Logbook API right now. Try again in a moment."
+
+        if not error and not matches:
+            error = f"No logged QSO with {callsign} found in your QRZ Logbook."
+        elif not error and qso_key:
+            qso = next((m for m in matches if m["key"] == qso_key), None)
+            if qso is None:
+                error = "That logged QSO couldn't be found -- your QRZ Logbook may have changed."
+            else:
+                # A specific QSO was picked -- show its preview, not the
+                # full match table again.
+                matches = []
 
     return render_template(
         "admin_qso_label.html",
@@ -557,17 +618,24 @@ def admin_qso_label():
 @app.route("/admin/qso-label/pdf")
 @admin_required
 def admin_qso_label_pdf():
-    qso_id = _parse_int(request.args.get("qso_id"), default=0)
+    callsign = request.args.get("callsign", "").strip().upper()
+    qso_key = request.args.get("qso_key", "")
     position = labels.clamp_qso_position(_parse_int(request.args.get("position"), default=1))
-    if not qso_id:
+    if not callsign or not qso_key:
         abort(400)
 
+    if not QRZ_LOGBOOK_API_KEY:
+        abort(503)
+
     try:
-        qso = photomap_store.get_my_qso(qso_id)
-    except S3Error as exc:
-        logger.warning("QSO label S3 error: %s", exc)
+        matches = _fetch_qso_matches(callsign)
+    except QrzLogbookError as exc:
+        logger.warning("QRZ Logbook error: %s", exc)
+        abort(502)
+    except Exception:
         abort(502)
 
+    qso = next((m for m in matches if m["key"] == qso_key), None)
     if qso is None:
         abort(404)
 
