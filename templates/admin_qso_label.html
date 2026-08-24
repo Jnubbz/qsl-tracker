@@ -31,6 +31,12 @@
       <p class="flag-missing">{{ error }}</p>
       {% if timing_note %}
         <p class="muted">{{ timing_note }}</p>
+        <p>
+          <a class="button-link" href="{{ url_for('admin_qso_label', callsign=callsign, debug=1 if debug else None) }}">Search again</a>
+          &mdash; same callsign, no retyping needed. QRZ's recovery time
+          varies, so a second (or third) try a few seconds apart often
+          succeeds even when this page's own built-in retries didn't.
+        </p>
       {% endif %}
     </section>
   {% endif %}

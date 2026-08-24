@@ -612,19 +612,21 @@ def admin_qso_label():
     elif callsign:
         # Wall-clock timing, not just an attempt count, so a diagnostic
         # session can report exactly how many seconds elapsed before
-        # (or whether) QRZ started answering correctly -- two rounds of
-        # guessing a bigger retry *count* (2, then 4 attempts) each
-        # turned out insufficient, and each time the debug view's own
-        # follow-up attempts found the QSO anyway, just later. A
-        # 2026-08-24 measurement using this instrumentation finally
-        # pinned down a real number: with the 4-retry window (5 total
-        # attempts, ~6-7s of sleep) exhausted and failing, the very
-        # first post-retry debug attempt succeeded at t=+7.4s since page
-        # load -- meaning the true recovery point was only a second or
-        # so past where the retry window cut off. RETRY_COUNT below is
-        # sized to roughly double that measured 7.4s (~12s of sleep
-        # alone, ~14-16s including request latency) for real margin
-        # instead of another tight guess.
+        # (or whether) QRZ started answering correctly. Two rounds of
+        # guessing a bigger retry *count* (2, then 4, then 8 attempts)
+        # each turned out insufficient in turn -- a 2026-08-24
+        # measurement pinned a real recovery at t=+7.4s once, but the
+        # very next live report showed 9 attempts spanning 14.1s STILL
+        # all coming back empty. That second number is the important
+        # one: QRZ's recovery time isn't a tight, predictable window --
+        # it varies meaningfully run to run, and there's no evidence
+        # it's bounded by any number small enough to keep blocking a
+        # single page load on synchronously (Render/gunicorn's own
+        # request timeout is a real ceiling on how long this can grow).
+        # RETRY_COUNT below is kept at a level that already resolves
+        # the common/faster case; for the slower case, the design
+        # deliberately stops trying to out-guess QRZ's timing and
+        # instead makes retrying by hand (below) fast and obvious.
         fetch_start = time.time()
 
         def _elapsed():
@@ -638,37 +640,49 @@ def admin_qso_label():
             error = "Couldn't reach QRZ's Logbook API right now. Try again in a moment."
 
         # Retry several times (short pause between) before concluding
-        # "not found" -- see the timing comment above for how this
-        # count was derived from a real measured recovery time (7.4s)
-        # rather than another guess. This costs time only in that
-        # apparently-not-rare case; a search that finds something on the
-        # first try never touches this loop.
+        # "not found" -- see the timing comment above for why this
+        # count is no longer being chased upward. A retry attempt that
+        # itself throws (a genuine transient network blip, not QRZ
+        # answering "empty") is treated the same as an empty result and
+        # the loop keeps going, rather than aborting the whole window
+        # on one bad attempt -- previously a single such exception would
+        # have silently cut the retry budget short of what `timing_note`
+        # claimed. This costs time only in the not-rare-enough case; a
+        # search that finds something on the first try never touches
+        # this loop.
         RETRY_COUNT = 8
+        attempts_made = 1
+        retry_error_count = 0
         if not error and not matches:
             for _ in range(RETRY_COUNT):
                 time.sleep(1.5)
+                attempts_made += 1
                 try:
                     matches = _fetch_qso_matches(callsign)
                 except Exception:
-                    # A retry failing outright isn't more informative than
-                    # the empty result already in hand -- fall through to
-                    # the "not found" diagnostics below rather than
-                    # replacing a clear (if disappointing) state with a
-                    # transient fetch error.
-                    break
+                    retry_error_count += 1
+                    continue
                 if matches:
                     break
 
         if not error and not matches:
-            timing_note = (
+            note = (
                 f"The primary search plus its retries took {_elapsed()}s total "
-                f"({RETRY_COUNT + 1} attempts, all came back empty) before giving up."
+                f"({attempts_made} attempts"
             )
+            if retry_error_count:
+                note += f", {retry_error_count} of which failed outright rather than just coming back empty"
+            note += ") before giving up."
+            timing_note = note
             error = (
-                f"No logged QSO with {callsign} found in your QRZ Logbook via the API. "
-                "If you just logged this, QRZ's API can occasionally lag a few minutes "
-                "behind the website -- try again shortly. The list below shows what your "
-                "API key can see right now, in case it's under a slightly different call."
+                f"No logged QSO with {callsign} found in your QRZ Logbook via the API yet. "
+                "QRZ's Logbook API has been observed to answer this exact request "
+                "inconsistently right after a QSO is logged -- sometimes it resolves within "
+                "a few seconds, sometimes it takes longer than one page load can reasonably "
+                "wait for. If you just logged this, wait a few more seconds and use the "
+                "\"Search again\" link below (no need to retype the callsign) -- it should "
+                "turn up within a try or two. The list below shows what your API key can see "
+                "right now, in case it's under a slightly different call."
             )
             # Diagnostic -- surface exactly what happened (empty-but-OK vs.
             # an outright failure) rather than just logging it server-side,
