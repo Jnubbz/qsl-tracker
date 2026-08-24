@@ -6,9 +6,12 @@
     <p>
       Upload your own log (.adi) so the
       <a href="{{ url_for('admin_photomap_upload') }}">card upload page</a>
-      can auto-fill QSO details for a callsign instead of typing them by hand.
-      This only reads date/band/mode/frequency/RST -- it never touches QRZ, and
-      it's safe to upload the same log more than once (duplicates are skipped).
+      can auto-fill QSO details for a callsign instead of typing them by hand,
+      and so <a href="{{ url_for('admin_qso_label') }}">QSO labels</a> have
+      something to print. This only reads date/time/band/mode/frequency/RST --
+      it never touches QRZ, and it's safe to upload the same log more than once
+      (duplicates are skipped, and re-uploading will backfill a UTC time onto
+      any older record that's missing one).
     </p>
     <p class="muted">{{ qso_count }} QSO record{{ 's' if qso_count != 1 else '' }} on file right now.</p>
     <form method="post" action="{{ url_for('admin_import_adif') }}" enctype="multipart/form-data">

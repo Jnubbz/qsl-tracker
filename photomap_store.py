@@ -245,18 +245,23 @@ def delete_photo_card(card_id: int) -> dict | None:
 # Josh's own logged QSOs (for auto-fill), imported from ADIF
 # ---------------------------------------------------------------------
 
-def import_my_qsos(qsos: list) -> int:
+def import_my_qsos(qsos: list) -> tuple[int, int]:
     """Bulk-add parsed ADIF QSOs (adif.AdifQso), skipping ones with no
     callsign. De-duplicates against (callsign, qso_date, band, mode,
     freq) so re-uploading the same or an overlapping log is safe and
-    won't create duplicates. Returns how many new entries were added."""
+    won't create duplicates. Also backfills `time_on` onto an already-
+    imported record that's missing it (older imports, from before the
+    QSO-label feature needed a UTC time, never captured it) -- so
+    re-uploading the same log after that change picks up time without
+    creating a duplicate entry. Returns (added, backfilled) counts."""
     data = _load()
-    existing_keys = {
-        (q["callsign"], q.get("qso_date"), q.get("band"), q.get("mode"), q.get("freq"))
+    existing = {
+        (q["callsign"], q.get("qso_date"), q.get("band"), q.get("mode"), q.get("freq")): q
         for q in data["my_qsos"]
     }
 
     added = 0
+    backfilled = 0
     for qso in qsos:
         callsign = qso.callsign
         if not callsign:
@@ -269,28 +274,36 @@ def import_my_qsos(qsos: list) -> int:
             f.get("mode", "").upper(),
             f.get("freq", ""),
         )
-        if key in existing_keys:
+        time_on = f.get("time_on", "")
+
+        existing_row = existing.get(key)
+        if existing_row is not None:
+            if time_on and not existing_row.get("time_on"):
+                existing_row["time_on"] = time_on
+                backfilled += 1
             continue
-        existing_keys.add(key)
 
         qso_id = data["next_my_qso_id"]
         data["next_my_qso_id"] = qso_id + 1
-        data["my_qsos"].append({
+        new_row = {
             "id": qso_id,
             "callsign": callsign,
             "qso_date": f.get("qso_date", ""),
+            "time_on": time_on,
             "band": f.get("band", "").upper(),
             "mode": f.get("mode", "").upper(),
             "freq": f.get("freq", ""),
             "rst_sent": f.get("rst_sent", ""),
             "rst_rcvd": f.get("rst_rcvd", ""),
             "created_at": time.time(),
-        })
+        }
+        data["my_qsos"].append(new_row)
+        existing[key] = new_row
         added += 1
 
-    if added:
+    if added or backfilled:
         _save(data)
-    return added
+    return added, backfilled
 
 
 def find_my_qsos(callsign: str) -> list[dict]:
@@ -299,6 +312,16 @@ def find_my_qsos(callsign: str) -> list[dict]:
     rows = [q for q in data["my_qsos"] if q["callsign"] == callsign]
     rows.sort(key=lambda q: q.get("qso_date") or "", reverse=True)
     return rows
+
+
+def get_my_qso(qso_id: int) -> dict | None:
+    """One logged QSO by id -- used by the QSO-label page once a
+    specific contact has been picked from find_my_qsos()'s list."""
+    data = _load()
+    for q in data["my_qsos"]:
+        if q["id"] == qso_id:
+            return q
+    return None
 
 
 def count_my_qsos() -> int:
