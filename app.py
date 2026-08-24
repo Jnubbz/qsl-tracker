@@ -645,15 +645,30 @@ def admin_qso_label():
                 recent_note = f"Couldn't check recent QSOs either ({type(exc).__name__}: {exc})."
 
             # Raw-response debug view, opt-in via ?debug=1 -- shows the
-            # literal, completely unparsed bytes QRZ sent back for both
-            # requests, so a "the API genuinely has nothing" conclusion
-            # can be checked against the actual response rather than
-            # this module's interpretation of it.
+            # literal, completely unparsed bytes QRZ sent back, so a "the
+            # API genuinely has nothing" conclusion can be checked
+            # against the actual response rather than this module's
+            # interpretation of it. The CALL: request is fired three
+            # times in a row (a couple seconds apart) rather than once --
+            # a single debug fetch previously came back RESULT=OK,
+            # COUNT=1 with a real, fully-parseable QSO, while the normal
+            # search page (same exact request, confirmed via a hard
+            # refresh so it isn't a browser-cache artifact) kept
+            # reporting zero matches moments later. Repeating the request
+            # here is how to tell "QRZ is genuinely inconsistent between
+            # near-simultaneous identical calls" apart from "that one
+            # lucky response was a fluke that won't reproduce" -- both
+            # are real possibilities and neither should be assumed.
             if debug:
-                try:
-                    raw_call = fetch_raw(QRZ_LOGBOOK_API_KEY, call_option(callsign))
-                except Exception as exc:
-                    raw_call = f"(raw fetch itself failed: {type(exc).__name__}: {exc})"
+                raw_call_attempts = []
+                for attempt in range(3):
+                    try:
+                        raw_call_attempts.append(fetch_raw(QRZ_LOGBOOK_API_KEY, call_option(callsign)))
+                    except Exception as exc:
+                        raw_call_attempts.append(f"(raw fetch itself failed: {type(exc).__name__}: {exc})")
+                    if attempt < 2:
+                        time.sleep(1.5)
+                raw_call = raw_call_attempts
                 try:
                     raw_recent = fetch_raw(QRZ_LOGBOOK_API_KEY, recent_option())
                 except Exception as exc:
