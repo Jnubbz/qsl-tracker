@@ -11,13 +11,17 @@ sheets:
   * A **QSO label** (`generate_qso_label_pdf`) from one of Josh's own
     logged QSOs (see photomap_store.py's `my_qsos` -- imported from his
     ADIF log, never QRZ, since QRZ only knows a station's own profile,
-    not the specifics of a contact with them) -- callsign, date/time in
-    UTC, band/mode/freq, and RST sent/received. Printed on **Avery 5163**
-    (and twins -- 8163, 18163, 5263, 5513, 5523, 5795, 5923, 5963): the
-    2"x4" shipping-label sheet, 10 per page (2 columns x 5 rows) --
-    deliberately kept at this size since it's meant to be cut out and
-    stuck onto a blank 2"x4" spot on the physical QSL card itself, not
-    printed on whatever address-label stock happens to be on hand.
+    not the specifics of a contact with them) -- callsign as a header,
+    date/time in UTC underneath, then a two-column grid of whichever of
+    Band/Mode/Freq/Grid square/RST sent/RST received that QSO actually
+    has. Printed on **Avery 5163** (and twins -- 8163, 18163, 5263,
+    5513, 5523, 5795, 5923, 5963): the 2"x4" shipping-label sheet, 10
+    per page (2 columns x 5 rows) -- deliberately kept at this size
+    since it's meant to be cut out and stuck onto a blank 2"x4" spot on
+    the physical QSL card itself, not printed on whatever address-label
+    stock happens to be on hand. The grid layout (`_render_qso_grid_pdf_multi`)
+    is purpose-built to use the full cell rather than reusing the
+    generic stacked-line renderer the mailing label uses.
 
 Both sheet geometries are Avery's own published specs, each
 hand-verified to add up to an exact 8.5in x 11in US Letter sheet:
@@ -173,9 +177,9 @@ def _wrap(text: str, font: str, size: float, max_width: float) -> list[str]:
 
 
 def _wrap_lines(raw_lines: list[str], layout: SheetLayout) -> list[tuple[str, str, float]]:
-    """Shared by label_lines() and qso_label_lines(): the first line
-    renders bold/larger as a header, the rest as body text, each wrapped
-    to fit the given layout's label width."""
+    """Used by label_lines() (the mailing label's generic stacked-line
+    renderer): the first line renders bold/larger as a header, the rest
+    as body text, each wrapped to fit the given layout's label width."""
     max_width = layout.label_w - 2 * layout.padding
     out: list[tuple[str, str, float]] = []
     for i, text in enumerate(raw_lines):
@@ -232,34 +236,35 @@ def _format_qso_time(raw: str) -> str:
     return f"{raw}Z" if raw else ""
 
 
-def qso_label_lines(qso: dict) -> list[tuple[str, str, float]]:
-    """The (text, font, size) lines a QSO label renders -- callsign,
-    date/time (UTC), band/mode/freq, RST sent/received -- wrapped to fit
-    the Avery 5163 layout, same as label_lines() above for the
-    mailing-label case."""
-    # " * " (not just extra spaces) as the separator between sub-fields on
-    # the same line -- _wrap()'s word-wrap normalizes whitespace via
-    # str.split()/" ".join(), which would otherwise collapse a double
-    # space down to one and lose the visual separation entirely.
-    date_time = " * ".join(
+def qso_label_fields(qso: dict) -> dict:
+    """Structured content for the QSO label's two-column details grid:
+    `header` (callsign), `subheader` (date/time, UTC), and `pairs` (a
+    list of (label, value) tuples -- Band/Mode/Freq/Grid/RST Sent/RST
+    Rcvd, each included only if that QSO actually has a value for it,
+    so an older record missing e.g. a grid square just renders fewer
+    pairs rather than a blank one). Shared by the PDF grid renderer and
+    the on-page preview so they never drift apart."""
+    header = qso.get("callsign", "")
+    subheader = " * ".join(
         p for p in (_format_qso_date(qso.get("qso_date", "")), _format_qso_time(qso.get("time_on", ""))) if p
     )
 
     freq = qso.get("freq", "")
-    band_mode_freq = " * ".join(
-        p for p in (qso.get("band", ""), qso.get("mode", ""), f"{freq} MHz" if freq else "") if p
-    )
-
-    rst_bits = []
+    pairs: list[tuple[str, str]] = []
+    if qso.get("band"):
+        pairs.append(("Band", qso["band"]))
+    if qso.get("mode"):
+        pairs.append(("Mode", qso["mode"]))
+    if freq:
+        pairs.append(("Freq", f"{freq} MHz"))
+    if qso.get("gridsquare"):
+        pairs.append(("Grid", qso["gridsquare"]))
     if qso.get("rst_sent"):
-        rst_bits.append(f"RST Sent {qso['rst_sent']}")
+        pairs.append(("RST Sent", qso["rst_sent"]))
     if qso.get("rst_rcvd"):
-        rst_bits.append(f"RST Rcvd {qso['rst_rcvd']}")
+        pairs.append(("RST Rcvd", qso["rst_rcvd"]))
 
-    raw_lines = [qso.get("callsign", ""), date_time, band_mode_freq, " * ".join(rst_bits)]
-    raw_lines = [line for line in raw_lines if line]
-
-    return _wrap_lines(raw_lines, QSO_LAYOUT)
+    return {"header": header, "subheader": subheader, "pairs": pairs}
 
 
 def _render_pdf_multi(
@@ -300,6 +305,74 @@ def _render_pdf(
     return _render_pdf_multi([(lines, position)], title, layout)
 
 
+# Type scale for the QSO label's two-column details grid -- distinct
+# from SheetLayout.header_font/body_font (which stay in place for the
+# generic stacked-line renderer above, still used by the mailing
+# label). Sized to actually fill the Avery 5163's 4"x2" cell now that
+# the label isn't just a handful of short centered lines.
+_QSO_HEADER_FONT, _QSO_HEADER_SIZE = "Helvetica-Bold", 18
+_QSO_SUB_FONT, _QSO_SUB_SIZE = "Helvetica", 11
+_QSO_PAIR_LABEL_FONT, _QSO_PAIR_LABEL_SIZE = "Helvetica-Bold", 10.5
+_QSO_PAIR_VALUE_FONT, _QSO_PAIR_VALUE_SIZE = "Helvetica", 10.5
+_QSO_ROW_HEIGHT = 0.32 * inch
+
+
+def _render_qso_grid_pdf_multi(entries: list[tuple[dict, int]], title: str) -> bytes:
+    """Render a single US Letter PDF with each `(qso, position)` in
+    `entries` drawn as a two-column details grid at its own Avery 5163
+    position, everything else left blank: the callsign as a centered
+    header banner, the date/time underneath, a divider rule, then
+    Band/Mode/Freq/Grid/RST Sent/RST Rcvd (whichever the QSO actually
+    has) as labeled pairs two to a row -- filling the full 4"x2" cell
+    instead of a few short centered lines huddled in the middle of it."""
+    layout = QSO_LAYOUT
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=letter)
+    c.setTitle(title)
+
+    inner_w = layout.label_w - 2 * layout.padding
+    col_w = inner_w / 2
+
+    for qso, position in entries:
+        fields = qso_label_fields(qso)
+        x0, y0 = layout.origin(position)
+        center_x = x0 + layout.label_w / 2
+        top = y0 + layout.label_h - layout.padding
+
+        c.setFont(_QSO_HEADER_FONT, _QSO_HEADER_SIZE)
+        y = top - _QSO_HEADER_SIZE * 0.85
+        c.drawCentredString(center_x, y, fields["header"])
+
+        if fields["subheader"]:
+            c.setFont(_QSO_SUB_FONT, _QSO_SUB_SIZE)
+            y -= _QSO_SUB_SIZE + 4
+            c.drawCentredString(center_x, y, fields["subheader"])
+
+        pairs = fields["pairs"]
+        if pairs:
+            y -= 10
+            c.setLineWidth(0.75)
+            c.line(x0 + layout.padding, y, x0 + layout.label_w - layout.padding, y)
+            y -= _QSO_ROW_HEIGHT * 0.75
+
+            for i, (label, value) in enumerate(pairs):
+                row, col = divmod(i, 2)
+                cell_x = x0 + layout.padding + col * col_w
+                cell_y = y - row * _QSO_ROW_HEIGHT
+
+                c.setFont(_QSO_PAIR_LABEL_FONT, _QSO_PAIR_LABEL_SIZE)
+                label_text = f"{label}: "
+                c.drawString(cell_x, cell_y, label_text)
+
+                c.setFont(_QSO_PAIR_VALUE_FONT, _QSO_PAIR_VALUE_SIZE)
+                value_x = cell_x + stringWidth(label_text, _QSO_PAIR_LABEL_FONT, _QSO_PAIR_LABEL_SIZE)
+                c.drawString(value_x, cell_y, value)
+
+    c.showPage()
+    c.save()
+    return buffer.getvalue()
+
+
 def generate_mailing_label_pdf(record: QrzRecord, position: int = 1) -> bytes:
     """Render a US Letter PDF with one QSL mailing label filled in at
     `position` (1-30, Avery 8160 layout), everything else left blank."""
@@ -309,13 +382,11 @@ def generate_mailing_label_pdf(record: QrzRecord, position: int = 1) -> bytes:
 
 
 def generate_qso_label_pdf(qso: dict, position: int = 1) -> bytes:
-    """Render a US Letter PDF with one QSO label (callsign, date/time
-    UTC, band/mode/freq, RST) filled in at `position` (1-10, Avery 5163
-    layout), everything else left blank -- meant to be stuck onto the
-    physical QSL card."""
-    return _render_pdf(
-        qso_label_lines(qso), position, f"QSO label -- {qso.get('callsign', '')}", QSO_LAYOUT
-    )
+    """Render a US Letter PDF with one QSO label -- callsign, date/time
+    UTC, then Band/Mode/Freq/Grid/RST as a two-column details grid --
+    filled in at `position` (1-10, Avery 5163 layout), everything else
+    left blank -- meant to be stuck onto the physical QSL card."""
+    return _render_qso_grid_pdf_multi([(qso, position)], f"QSO label -- {qso.get('callsign', '')}")
 
 
 def generate_mailing_batch_pdf(items: list[tuple[QrzRecord, int]]) -> bytes:
@@ -329,8 +400,8 @@ def generate_mailing_batch_pdf(items: list[tuple[QrzRecord, int]]) -> bytes:
 
 def generate_qso_batch_pdf(items: list[tuple[dict, int]]) -> bytes:
     """Render a single US Letter PDF with several different QSO labels,
-    each `(qso, position)` pair filled in at its own position (1-10,
-    Avery 5163 layout) -- so one sheet can carry more than one QSO
-    instead of using a whole page for just one."""
-    entries = [(qso_label_lines(qso), position) for qso, position in items]
-    return _render_pdf_multi(entries, "QSO label batch", QSO_LAYOUT)
+    each `(qso, position)` pair drawn as its own two-column details
+    grid at its own position (1-10, Avery 5163 layout) -- so one sheet
+    can carry more than one QSO instead of using a whole page for just
+    one."""
+    return _render_qso_grid_pdf_multi(items, "QSO label batch")

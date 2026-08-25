@@ -341,15 +341,43 @@ table.contacts tr.direct { background: rgba(47, 157, 111, 0.12); }
 .label-preview p:first-child { margin-top: 0 !important; }
 .label-preview-header { font-weight: 700; }
 
-/* Avery 5163/8163/18163 -- 2"x4" QSO label */
+/* Avery 5163/8163/18163 -- 2"x4" QSO label. Unlike the mailing label
+   below (a handful of short centered lines, so vertically centering
+   the whole block still looks right), the QSO label's two-column
+   details grid is meant to fill the cell top-to-bottom, so it aligns
+   to the top like the PDF does instead of centering as one block. */
 .label-preview--5163 {
   width: 4in;
   aspect-ratio: 2 / 1;
   padding: 0.2in;
+  justify-content: flex-start;
 }
-.label-preview--5163 p { margin: 0.1in 0 0; }
-.label-preview--5163 .label-preview-header { font-size: 12pt; }
-.label-preview--5163 .label-preview-line { font-size: 10.5pt; }
+.qso-preview-header {
+  margin: 0;
+  font-size: 18pt;
+  font-weight: 700;
+  text-align: center;
+}
+.qso-preview-subheader {
+  margin: 4pt 0 0;
+  font-size: 11pt;
+  text-align: center;
+}
+.qso-preview-rule {
+  margin: 10pt 0 0.18in;
+  border-top: 0.75pt solid #111111;
+}
+.qso-preview-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 0.1in;
+  row-gap: 0.09in;
+}
+.qso-preview-pair {
+  margin: 0;
+  font-size: 10.5pt;
+}
+.qso-preview-pair-label { font-weight: 700; }
 
 /* Avery 8160/5160/5260 -- 1"x2-5/8" mailing label */
 .label-preview--8160 {

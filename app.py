@@ -731,7 +731,7 @@ def admin_qso_label():
         label_count=labels.QSO_LABEL_COUNT,
         matches=matches,
         qso=qso,
-        qso_label_lines=labels.qso_label_lines(qso) if qso else [],
+        qso_fields=labels.qso_label_fields(qso) if qso else None,
         error=error,
         batch=batch,
         batch_full=len(batch) >= labels.QSO_LABEL_COUNT,
@@ -894,7 +894,7 @@ def admin_import_adif():
             return redirect(url_for("admin_import_adif"))
         message = f"Imported {added} new QSO record(s) ({len(qsos)} found in the file)."
         if backfilled:
-            message += f" Backfilled a UTC time onto {backfilled} already-imported record(s)."
+            message += f" Backfilled a UTC time and/or grid square onto {backfilled} already-imported record(s)."
         flash(message, "success")
         return redirect(url_for("admin_import_adif"))
 

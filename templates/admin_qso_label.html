@@ -12,8 +12,10 @@
       Pulls from your imported ADIF log (see
       <a href="{{ url_for('admin_import_adif') }}">import/refresh your log</a>
       if a recent QSO is missing) so you get callsign, date/time in UTC,
-      band/mode/freq, and RST sent/received on a print-ready label sized
-      for one cell of an Avery 5163 / 8163 / 18163 sheet (2"&times;4", 10
+      and a details grid of band/mode/freq/grid square/RST sent/received
+      (whichever your log actually has for that QSO) on a print-ready
+      label sized for one cell of an Avery 5163 / 8163 / 18163 sheet
+      (2"&times;4", 10
       per page) &mdash; meant to be stuck onto the blank 2"&times;4" spot
       on the card itself instead of hand-written. A QSO missing here just
       means it isn't in your imported log yet. Looking for a
@@ -116,9 +118,18 @@
     <section class="card">
       <h1>Preview</h1>
       <div class="label-preview label-preview--5163">
-        {% for text, font, size in qso_label_lines %}
-          <p class="{{ 'label-preview-header' if loop.first else 'label-preview-line' }}">{{ text }}</p>
-        {% endfor %}
+        <p class="qso-preview-header">{{ qso_fields.header }}</p>
+        {% if qso_fields.subheader %}
+          <p class="qso-preview-subheader">{{ qso_fields.subheader }}</p>
+        {% endif %}
+        {% if qso_fields.pairs %}
+          <div class="qso-preview-rule"></div>
+          <div class="qso-preview-grid">
+            {% for label, value in qso_fields.pairs %}
+              <p class="qso-preview-pair"><span class="qso-preview-pair-label">{{ label }}:</span> {{ value }}</p>
+            {% endfor %}
+          </div>
+        {% endif %}
       </div>
 
       <form method="get" action="{{ url_for('admin_qso_label') }}" style="margin-top: 1rem;">

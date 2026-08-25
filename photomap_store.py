@@ -249,10 +249,10 @@ def import_my_qsos(qsos: list) -> tuple[int, int]:
     """Bulk-add parsed ADIF QSOs (adif.AdifQso), skipping ones with no
     callsign. De-duplicates against (callsign, qso_date, band, mode,
     freq) so re-uploading the same or an overlapping log is safe and
-    won't create duplicates. Also backfills `time_on` onto an already-
-    imported record that's missing it (older imports, from before the
-    QSO-label feature needed a UTC time, never captured it) -- so
-    re-uploading the same log after that change picks up time without
+    won't create duplicates. Also backfills `time_on`/`gridsquare` onto
+    an already-imported record that's missing either (older imports,
+    from before those fields were captured, never had them) -- so
+    re-uploading the same log after that change picks them up without
     creating a duplicate entry. Returns (added, backfilled) counts."""
     data = _load()
     existing = {
@@ -275,11 +275,18 @@ def import_my_qsos(qsos: list) -> tuple[int, int]:
             f.get("freq", ""),
         )
         time_on = f.get("time_on", "")
+        gridsquare = f.get("gridsquare", "")
 
         existing_row = existing.get(key)
         if existing_row is not None:
+            row_changed = False
             if time_on and not existing_row.get("time_on"):
                 existing_row["time_on"] = time_on
+                row_changed = True
+            if gridsquare and not existing_row.get("gridsquare"):
+                existing_row["gridsquare"] = gridsquare
+                row_changed = True
+            if row_changed:
                 backfilled += 1
             continue
 
@@ -295,6 +302,7 @@ def import_my_qsos(qsos: list) -> tuple[int, int]:
             "freq": f.get("freq", ""),
             "rst_sent": f.get("rst_sent", ""),
             "rst_rcvd": f.get("rst_rcvd", ""),
+            "gridsquare": gridsquare,
             "created_at": time.time(),
         }
         data["my_qsos"].append(new_row)

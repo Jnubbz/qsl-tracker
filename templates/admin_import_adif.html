@@ -9,11 +9,11 @@
       can auto-fill QSO details for a callsign instead of typing them by
       hand -- and so <a href="{{ url_for('admin_qso_label') }}">QSO labels</a>
       have something to print from. This only reads
-      date/time/band/mode/frequency/RST -- it never touches QRZ, and
-      it's safe to upload the same log more than once (duplicates are
-      skipped, and re-uploading will backfill a UTC time onto any older
-      record that's missing one, or pick up any newly-logged QSOs since
-      your last import).
+      date/time/band/mode/frequency/RST/grid square -- it never touches
+      QRZ, and it's safe to upload the same log more than once
+      (duplicates are skipped, and re-uploading will backfill a UTC
+      time or grid square onto any older record that's missing one, or
+      pick up any newly-logged QSOs since your last import).
     </p>
     <p class="muted">{{ qso_count }} QSO record{{ 's' if qso_count != 1 else '' }} on file right now.</p>
     <form method="post" action="{{ url_for('admin_import_adif') }}" enctype="multipart/form-data">
