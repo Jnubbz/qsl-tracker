@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import time
 
+import dxcc
 from s3 import S3Error, get_json, put_json
 
 INDEX_KEY = "photocards/_index.json"
@@ -245,15 +246,29 @@ def delete_photo_card(card_id: int) -> dict | None:
 # Josh's own logged QSOs (for auto-fill), imported from ADIF
 # ---------------------------------------------------------------------
 
+def _entity_for(callsign: str, adif_country: str) -> str:
+    """DXCC entity for one imported QSO -- prefer whatever Josh's own
+    logging software already wrote into the ADIF's COUNTRY field (it
+    presumably knows more than a static prefix table, e.g. about a
+    specific special-event call), and only fall back to deriving it
+    from the callsign prefix (see dxcc.py -- best-effort, not
+    authoritative) when the log didn't say. Either way this can come
+    back empty, same as any other optional field here."""
+    if adif_country:
+        return adif_country
+    return dxcc.entity_for_callsign(callsign) or ""
+
+
 def import_my_qsos(qsos: list) -> tuple[int, int]:
     """Bulk-add parsed ADIF QSOs (adif.AdifQso), skipping ones with no
     callsign. De-duplicates against (callsign, qso_date, band, mode,
     freq) so re-uploading the same or an overlapping log is safe and
-    won't create duplicates. Also backfills `time_on`/`gridsquare` onto
-    an already-imported record that's missing either (older imports,
-    from before those fields were captured, never had them) -- so
-    re-uploading the same log after that change picks them up without
-    creating a duplicate entry. Returns (added, backfilled) counts."""
+    won't create duplicates. Also backfills `time_on`/`gridsquare`/
+    `dxcc_entity` onto an already-imported record that's missing any of
+    them (older imports, from before those fields were captured, never
+    had them) -- so re-uploading the same log after that change picks
+    them up without creating a duplicate entry. Returns (added,
+    backfilled) counts."""
     data = _load()
     existing = {
         (q["callsign"], q.get("qso_date"), q.get("band"), q.get("mode"), q.get("freq")): q
@@ -276,6 +291,7 @@ def import_my_qsos(qsos: list) -> tuple[int, int]:
         )
         time_on = f.get("time_on", "")
         gridsquare = f.get("gridsquare", "")
+        dxcc_entity = _entity_for(callsign, f.get("country", ""))
 
         existing_row = existing.get(key)
         if existing_row is not None:
@@ -285,6 +301,9 @@ def import_my_qsos(qsos: list) -> tuple[int, int]:
                 row_changed = True
             if gridsquare and not existing_row.get("gridsquare"):
                 existing_row["gridsquare"] = gridsquare
+                row_changed = True
+            if dxcc_entity and not existing_row.get("dxcc_entity"):
+                existing_row["dxcc_entity"] = dxcc_entity
                 row_changed = True
             if row_changed:
                 backfilled += 1
@@ -303,6 +322,7 @@ def import_my_qsos(qsos: list) -> tuple[int, int]:
             "rst_sent": f.get("rst_sent", ""),
             "rst_rcvd": f.get("rst_rcvd", ""),
             "gridsquare": gridsquare,
+            "dxcc_entity": dxcc_entity,
             "created_at": time.time(),
         }
         data["my_qsos"].append(new_row)
@@ -335,3 +355,33 @@ def get_my_qso(qso_id: int) -> dict | None:
 def count_my_qsos() -> int:
     data = _load()
     return len(data["my_qsos"])
+
+
+def list_all_my_qsos(dxcc_entity: str = "", callsign: str = "") -> list[dict]:
+    """Every logged QSO, most recent first -- the "browse by DXCC
+    entity" page's data source. `dxcc_entity` (exact match) and
+    `callsign` (substring, so a partial callsign still narrows things
+    down) filter when given; either or both blank means no filtering
+    on that axis. A QSO with no captured entity (empty string) is
+    simply excluded whenever a specific entity is picked -- there's
+    nothing to match."""
+    data = _load()
+    rows = data["my_qsos"]
+    if dxcc_entity:
+        rows = [q for q in rows if q.get("dxcc_entity") == dxcc_entity]
+    if callsign:
+        callsign = callsign.upper()
+        rows = [q for q in rows if callsign in q["callsign"]]
+    return sorted(rows, key=lambda q: q.get("qso_date") or "", reverse=True)
+
+
+def list_dxcc_entities() -> list[str]:
+    """Distinct, non-empty DXCC entity names present across every
+    logged QSO, alphabetical -- populates the browse page's filter
+    dropdown. Entities only ever come from what's actually been
+    captured on import (ADIF COUNTRY field, or the prefix-derived
+    fallback -- see dxcc.py), so this naturally reflects however
+    complete or incomplete that capture is."""
+    data = _load()
+    seen = {q["dxcc_entity"] for q in data["my_qsos"] if q.get("dxcc_entity")}
+    return sorted(seen)

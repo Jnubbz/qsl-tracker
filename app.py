@@ -541,7 +541,7 @@ def admin_label_batch_add():
     now, not a stale snapshot from whenever this was added."""
     callsign = request.form.get("callsign", "").strip().upper()
     position = labels.clamp_mailing_position(_parse_int(request.form.get("position"), default=1))
-    redirect_to = url_for("admin_label", callsign=callsign, position=position)
+    redirect_to = _safe_next(url_for("admin_label", callsign=callsign, position=position))
 
     if not callsign:
         flash("Enter a callsign to add.", "error")
@@ -596,14 +596,14 @@ def admin_label_batch_remove():
     position = _parse_int(request.form.get("position"), default=0)
     batch = session.get("address_batch", [])
     session["address_batch"] = [b for b in batch if b["position"] != position]
-    return redirect(url_for("admin_label"))
+    return redirect(_safe_next(url_for("admin_label")))
 
 
 @app.route("/admin/label/batch/clear", methods=["POST"])
 @admin_required
 def admin_label_batch_clear():
     session.pop("address_batch", None)
-    return redirect(url_for("admin_label"))
+    return redirect(_safe_next(url_for("admin_label")))
 
 
 @app.route("/admin/label/batch/pdf")
@@ -670,6 +670,23 @@ def _next_free_position(used: set, count: int) -> int | None:
         if position not in used:
             return position
     return None
+
+
+def _safe_next(fallback: str) -> str:
+    """Where a batch add/remove/clear form should redirect back to.
+    Every such form's default target is its own page (`fallback`,
+    already a same-app url_for(...) result) -- but the browse-by-DXCC
+    page (admin_qsos()) also points these same forms at itself via a
+    hidden `next` field, so adding/removing from there doesn't bounce
+    Josh away to the single-lookup page. Only ever trusts a `next` that
+    is a path on this app (starts with exactly one leading "/", never
+    "//" which browsers treat as protocol-relative -- i.e. off-site);
+    anything else is quietly ignored in favor of the normal fallback,
+    same as if `next` had never been sent."""
+    target = request.form.get("next", "")
+    if target.startswith("/") and not target.startswith("//"):
+        return target
+    return fallback
 
 
 @app.route("/admin/qso-label")
@@ -775,7 +792,7 @@ def admin_qso_label_batch_add():
     qso_id = _parse_int(request.form.get("qso_id"), default=0)
     position = labels.clamp_qso_position(_parse_int(request.form.get("position"), default=1))
     callsign = request.form.get("callsign", "").strip().upper()
-    redirect_to = url_for("admin_qso_label", callsign=callsign)
+    redirect_to = _safe_next(url_for("admin_qso_label", callsign=callsign))
 
     try:
         qso = photomap_store.get_my_qso(qso_id) if qso_id else None
@@ -819,14 +836,14 @@ def admin_qso_label_batch_remove():
     position = _parse_int(request.form.get("position"), default=0)
     batch = session.get("qso_batch", [])
     session["qso_batch"] = [b for b in batch if b["position"] != position]
-    return redirect(url_for("admin_qso_label"))
+    return redirect(_safe_next(url_for("admin_qso_label")))
 
 
 @app.route("/admin/qso-label/batch/clear", methods=["POST"])
 @admin_required
 def admin_qso_label_batch_clear():
     session.pop("qso_batch", None)
-    return redirect(url_for("admin_qso_label"))
+    return redirect(_safe_next(url_for("admin_qso_label")))
 
 
 @app.route("/admin/qso-label/batch/pdf")
@@ -867,6 +884,65 @@ def admin_qso_label_batch_pdf():
     )
 
 
+@app.route("/admin/qsos")
+@admin_required
+def admin_qsos():
+    """Browse every logged QSO at once, optionally filtered by DXCC
+    entity (and/or a callsign substring) -- the entry point for
+    batching several QSO labels or several mailing addresses by
+    country instead of searching one callsign at a time. Each row's
+    "Add to QSO batch"/"Add address" forms post straight to the
+    existing admin_qso_label_batch_add()/admin_label_batch_add() routes
+    (a hidden `next` field brings Josh back here, filters intact,
+    instead of over to the single-lookup pages -- see _safe_next()).
+
+    A QSO's `dxcc_entity` comes from whatever import_my_qsos() captured
+    at ADIF-import time (the log's own COUNTRY field if present, else a
+    best-effort guess from the callsign prefix -- see dxcc.py); a QSO
+    imported before that capture existed, or whose callsign didn't
+    match anything in the prefix table, just won't have one and won't
+    show up under any specific entity filter (still shows up with no
+    filter, or under a callsign search)."""
+    selected_entity = request.args.get("entity", "")
+    callsign_filter = request.args.get("callsign", "").strip().upper()
+
+    try:
+        entities = photomap_store.list_dxcc_entities()
+        rows = photomap_store.list_all_my_qsos(
+            dxcc_entity=selected_entity, callsign=callsign_filter
+        )
+    except S3Error as exc:
+        flash(s3_config_hint(exc), "error")
+        entities = []
+        rows = []
+
+    self_url = url_for(
+        "admin_qsos", entity=selected_entity or None, callsign=callsign_filter or None
+    )
+
+    qso_batch = session.get("qso_batch", [])
+    qso_used = {b["position"] for b in qso_batch}
+    address_batch = session.get("address_batch", [])
+    address_used = {b["position"] for b in address_batch}
+
+    return render_template(
+        "admin_qsos.html",
+        entities=entities,
+        selected_entity=selected_entity,
+        callsign_filter=callsign_filter,
+        rows=rows,
+        self_url=self_url,
+        qso_label_count=labels.QSO_LABEL_COUNT,
+        mailing_label_count=labels.MAILING_LABEL_COUNT,
+        qso_batch=qso_batch,
+        qso_batch_full=len(qso_batch) >= labels.QSO_LABEL_COUNT,
+        next_qso_position=_next_free_position(qso_used, labels.QSO_LABEL_COUNT),
+        address_batch=address_batch,
+        address_batch_full=len(address_batch) >= labels.MAILING_LABEL_COUNT,
+        next_address_position=_next_free_position(address_used, labels.MAILING_LABEL_COUNT),
+    )
+
+
 @app.route("/admin/photomap/import-adif", methods=["GET", "POST"])
 @admin_required
 def admin_import_adif():
@@ -894,7 +970,7 @@ def admin_import_adif():
             return redirect(url_for("admin_import_adif"))
         message = f"Imported {added} new QSO record(s) ({len(qsos)} found in the file)."
         if backfilled:
-            message += f" Backfilled a UTC time and/or grid square onto {backfilled} already-imported record(s)."
+            message += f" Backfilled a UTC time, grid square, and/or DXCC entity onto {backfilled} already-imported record(s)."
         flash(message, "success")
         return redirect(url_for("admin_import_adif"))
 

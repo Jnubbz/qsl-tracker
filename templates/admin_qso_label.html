@@ -21,6 +21,8 @@
       means it isn't in your imported log yet. Looking for a
       mailing-address label instead?
       <a href="{{ url_for('admin_label') }}">Print a QSL mailing label</a>.
+      Want to batch by country instead of one callsign at a time?
+      <a href="{{ url_for('admin_qsos') }}">Browse logged QSOs by DXCC entity</a>.
     </p>
 
     <form method="get" action="{{ url_for('admin_qso_label') }}" id="qso-label-form">

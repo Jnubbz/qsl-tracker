@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block title %}Browse Logged QSOs{% endblock %}
+{% block content %}
+  <section class="card">
+    <div class="dashboard-top">
+      <h1>Browse logged QSOs</h1>
+      <form method="post" action="{{ url_for('admin_logout') }}">
+        <button type="submit" class="link-button">Log out (admin)</button>
+      </form>
+    </div>
+    <p class="muted">
+      Every QSO from your imported ADIF log in one list, filterable by
+      DXCC entity (or by callsign) -- for batching several QSO labels or
+      several mailing addresses by country instead of searching one
+      callsign at a time. The entity shown for each QSO comes from your
+      log's own Country field when it has one, otherwise a best-effort
+      guess from the callsign prefix -- see
+      <a href="{{ url_for('admin_import_adif') }}">import/refresh your log</a>
+      if a QSO or its entity looks out of date. Looking for the
+      single-callsign flows instead?
+      <a href="{{ url_for('admin_qso_label') }}">Print a QSO label</a> &middot;
+      <a href="{{ url_for('admin_label') }}">Print a QSL mailing label</a>.
+    </p>
+
+    <form method="get" action="{{ url_for('admin_qsos') }}" id="qsos-filter-form">
+      <label for="entity">DXCC entity</label>
+      <select id="entity" name="entity">
+        <option value="" {% if not selected_entity %}selected{% endif %}>All entities</option>
+        {% for e in entities %}
+          <option value="{{ e }}" {% if e == selected_entity %}selected{% endif %}>{{ e }}</option>
+        {% endfor %}
+      </select>
+
+      <label for="callsign">Callsign contains</label>
+      <input type="text" id="callsign" name="callsign" value="{{ callsign_filter }}" placeholder="e.g. W1AW">
+
+      <button type="submit">Filter</button>
+      {% if selected_entity or callsign_filter %}
+        <a href="{{ url_for('admin_qsos') }}">Clear filters</a>
+      {% endif %}
+    </form>
+  </section>
+
+  {% if qso_batch %}
+    <section class="card">
+      <h1>QSO-label batch ({{ qso_batch | length }} of {{ qso_label_count }})</h1>
+      <p class="muted">
+        Everything below prints together on one sheet, each at its own
+        position &mdash; nothing else on the sheet is touched.
+      </p>
+      <table class="contacts">
+        <thead>
+          <tr><th>Position</th><th>Callsign</th><th>Date</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for b in qso_batch | sort(attribute='position') %}
+            <tr>
+              <td>{{ b.position }}</td>
+              <td>{{ b.callsign }}</td>
+              <td>{{ b.qso_date or '-' }}</td>
+              <td>
+                <form method="post" action="{{ url_for('admin_qso_label_batch_remove') }}" style="display: inline;">
+                  <input type="hidden" name="position" value="{{ b.position }}">
+                  <input type="hidden" name="next" value="{{ self_url }}">
+                  <button type="submit" class="link-button">Remove</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p style="margin-top: 1rem;">
+        <a class="button-link" href="{{ url_for('admin_qso_label_batch_pdf') }}" target="_blank" rel="noopener">Download batch PDF ({{ qso_batch | length }} label{{ 's' if qso_batch | length != 1 else '' }})</a>
+        &nbsp;
+        <form method="post" action="{{ url_for('admin_qso_label_batch_clear') }}" style="display: inline;">
+          <input type="hidden" name="next" value="{{ self_url }}">
+          <button type="submit" class="link-button">Clear batch</button>
+        </form>
+      </p>
+    </section>
+  {% endif %}
+
+  {% if address_batch %}
+    <section class="card">
+      <h1>Mailing-address batch ({{ address_batch | length }} of {{ mailing_label_count }})</h1>
+      <p class="muted">
+        Everything below prints together on one sheet, each at its own
+        position. Addresses are re-fetched from QRZ fresh at print time,
+        never saved here.
+      </p>
+      <table class="contacts">
+        <thead>
+          <tr><th>Position</th><th>Callsign</th><th>Name</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for b in address_batch | sort(attribute='position') %}
+            <tr>
+              <td>{{ b.position }}</td>
+              <td>{{ b.callsign }}</td>
+              <td>{{ b.name or '-' }}</td>
+              <td>
+                <form method="post" action="{{ url_for('admin_label_batch_remove') }}" style="display: inline;">
+                  <input type="hidden" name="position" value="{{ b.position }}">
+                  <input type="hidden" name="next" value="{{ self_url }}">
+                  <button type="submit" class="link-button">Remove</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p style="margin-top: 1rem;">
+        <a class="button-link" href="{{ url_for('admin_label_batch_pdf') }}" target="_blank" rel="noopener">Download batch PDF ({{ address_batch | length }} label{{ 's' if address_batch | length != 1 else '' }})</a>
+        &nbsp;
+        <form method="post" action="{{ url_for('admin_label_batch_clear') }}" style="display: inline;">
+          <input type="hidden" name="next" value="{{ self_url }}">
+          <button type="submit" class="link-button">Clear batch</button>
+        </form>
+      </p>
+    </section>
+  {% endif %}
+
+  <section class="card">
+    <h1>
+      {{ rows | length }} logged QSO{{ 's' if rows | length != 1 else '' }}
+      {% if selected_entity %}from {{ selected_entity }}{% endif %}
+      {% if callsign_filter %}matching &ldquo;{{ callsign_filter }}&rdquo;{% endif %}
+    </h1>
+    {% if rows %}
+      <table class="contacts">
+        <thead>
+          <tr>
+            <th>Callsign</th><th>Date</th><th>Band / Mode</th><th>Entity</th>
+            <th></th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for q in rows %}
+            <tr>
+              <td>{{ q['callsign'] }}</td>
+              <td>{{ q['qso_date'] or '-' }}</td>
+              <td>{{ [q['band'], q['mode']] | select | join(' / ') or '-' }}</td>
+              <td>{{ q.get('dxcc_entity') or '-' }}</td>
+              <td>
+                {% if qso_batch_full %}
+                  <span class="muted">QSO batch full</span>
+                {% else %}
+                  <form method="post" action="{{ url_for('admin_qso_label_batch_add') }}" style="display: inline;">
+                    <input type="hidden" name="qso_id" value="{{ q['id'] }}">
+                    <input type="hidden" name="callsign" value="{{ q['callsign'] }}">
+                    <input type="hidden" name="next" value="{{ self_url }}">
+                    <label class="visually-hidden" for="qso-pos-{{ q['id'] }}">Position</label>
+                    <select id="qso-pos-{{ q['id'] }}" name="position">
+                      {% for i in range(1, qso_label_count + 1) %}
+                        <option value="{{ i }}" {% if i == next_qso_position %}selected{% endif %}>{{ i }}</option>
+                      {% endfor %}
+                    </select>
+                    <button type="submit">Add QSO label</button>
+                  </form>
+                {% endif %}
+              </td>
+              <td>
+                {% if address_batch_full %}
+                  <span class="muted">Address batch full</span>
+                {% else %}
+                  <form method="post" action="{{ url_for('admin_label_batch_add') }}" style="display: inline;">
+                    <input type="hidden" name="callsign" value="{{ q['callsign'] }}">
+                    <input type="hidden" name="next" value="{{ self_url }}">
+                    <label class="visually-hidden" for="addr-pos-{{ q['id'] }}">Position</label>
+                    <select id="addr-pos-{{ q['id'] }}" name="position">
+                      {% for i in range(1, mailing_label_count + 1) %}
+                        <option value="{{ i }}" {% if i == next_address_position %}selected{% endif %}>{{ i }}</option>
+                      {% endfor %}
+                    </select>
+                    <button type="submit">Add address</button>
+                  </form>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">
+        No logged QSOs match this filter. If a callsign or entity you
+        expect is missing, try
+        <a href="{{ url_for('admin_import_adif') }}">re-importing your ADIF log</a>.
+      </p>
+    {% endif %}
+  </section>
+{% endblock %}

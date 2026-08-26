@@ -17,6 +17,7 @@
       {% if session.get('is_admin') %}
         <a href="{{ url_for('admin_label') }}">Print Mailing Label</a>
         <a href="{{ url_for('admin_qso_label') }}">Print QSO Label</a>
+        <a href="{{ url_for('admin_qsos') }}">Browse by DXCC Entity</a>
       {% endif %}
     </nav>
   </header>

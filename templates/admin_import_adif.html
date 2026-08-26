@@ -8,12 +8,17 @@
       <a href="{{ url_for('admin_photomap_upload') }}">card upload page</a>
       can auto-fill QSO details for a callsign instead of typing them by
       hand -- and so <a href="{{ url_for('admin_qso_label') }}">QSO labels</a>
-      have something to print from. This only reads
-      date/time/band/mode/frequency/RST/grid square -- it never touches
-      QRZ, and it's safe to upload the same log more than once
+      have something to print from -- and so
+      <a href="{{ url_for('admin_qsos') }}">browsing by DXCC entity</a>
+      has something to filter. This only reads
+      date/time/band/mode/frequency/RST/grid square/country -- it never
+      touches QRZ, and it's safe to upload the same log more than once
       (duplicates are skipped, and re-uploading will backfill a UTC
-      time or grid square onto any older record that's missing one, or
-      pick up any newly-logged QSOs since your last import).
+      time, grid square, or DXCC entity onto any older record that's
+      missing one, or pick up any newly-logged QSOs since your last
+      import). If your log doesn't tag a QSO's country itself, the
+      entity shown for it is a best-effort guess from the callsign's
+      prefix instead -- not authoritative, just enough to filter by.
     </p>
     <p class="muted">{{ qso_count }} QSO record{{ 's' if qso_count != 1 else '' }} on file right now.</p>
     <form method="post" action="{{ url_for('admin_import_adif') }}" enctype="multipart/form-data">
