@@ -830,6 +830,97 @@ def admin_qso_label_batch_add():
     return redirect(redirect_to)
 
 
+@app.route("/admin/qso-label/batch/add-selected", methods=["POST"])
+@admin_required
+def admin_qso_label_batch_add_selected():
+    """Add every checked QSO from the matches table on admin_qso_label()
+    to the running batch in one action, instead of picking a position
+    and submitting one at a time for each -- the common case when one
+    callsign has several logged QSOs and Josh wants more than one of
+    them on the sheet. Positions are auto-assigned in order via
+    _next_free_position(); for manual control over which exact
+    position one QSO lands on, click "Select" to preview it and add it
+    from there instead (unchanged).
+
+    All-or-nothing: if there isn't room for every newly-checked (not
+    already-batched) QSO, nothing is added, so a partial batch never
+    gets built by surprise."""
+    raw_ids = request.form.getlist("qso_id")
+    callsign = request.form.get("callsign", "").strip().upper()
+    redirect_to = _safe_next(url_for("admin_qso_label", callsign=callsign))
+
+    if not raw_ids:
+        flash("Check at least one QSO to add, then try again.", "error")
+        return redirect(redirect_to)
+
+    batch = session.get("qso_batch", [])
+    used_positions = {b["position"] for b in batch}
+    already_batched_ids = {b["qso_id"] for b in batch}
+
+    seen = set()
+    qso_ids = []
+    for raw in raw_ids:
+        qso_id = _parse_int(raw, default=0)
+        if qso_id and qso_id not in seen:
+            seen.add(qso_id)
+            qso_ids.append(qso_id)
+
+    to_add = []  # list of (qso_id, qso dict)
+    skipped_already_batched = 0
+    not_found = 0
+    for qso_id in qso_ids:
+        if qso_id in already_batched_ids:
+            skipped_already_batched += 1
+            continue
+        try:
+            qso = photomap_store.get_my_qso(qso_id)
+        except S3Error as exc:
+            flash(s3_config_hint(exc), "error")
+            return redirect(redirect_to)
+        if qso is None:
+            not_found += 1
+            continue
+        to_add.append((qso_id, qso))
+
+    if not to_add:
+        if skipped_already_batched and not not_found:
+            flash("Every QSO you checked is already in the batch.", "error")
+        else:
+            flash("Couldn't find any of the checked QSOs -- try again.", "error")
+        return redirect(redirect_to)
+
+    free_slots = labels.QSO_LABEL_COUNT - len(batch)
+    if len(to_add) > free_slots:
+        flash(
+            f"You checked {len(to_add)} new QSO{'s' if len(to_add) != 1 else ''}, "
+            f"but only {free_slots} position{'s' if free_slots != 1 else ''} "
+            f"{'are' if free_slots != 1 else 'is'} free on this sheet -- remove "
+            "some from the batch, or check fewer, and try again. Nothing was added.",
+            "error",
+        )
+        return redirect(redirect_to)
+
+    for qso_id, qso in to_add:
+        position = _next_free_position(used_positions, labels.QSO_LABEL_COUNT)
+        used_positions.add(position)
+        batch.append({
+            "qso_id": qso_id,
+            "position": position,
+            "callsign": qso["callsign"],
+            "qso_date": qso.get("qso_date", ""),
+        })
+    session["qso_batch"] = batch
+
+    parts = [f"Added {len(to_add)} QSO{'s' if len(to_add) != 1 else ''} to the batch."]
+    if skipped_already_batched:
+        parts.append(f"{skipped_already_batched} already in the batch, skipped.")
+    if not_found:
+        parts.append(f"{not_found} couldn't be found, skipped.")
+    flash(" ".join(parts), "success")
+
+    return redirect(redirect_to)
+
+
 @app.route("/admin/qso-label/batch/remove", methods=["POST"])
 @admin_required
 def admin_qso_label_batch_remove():
