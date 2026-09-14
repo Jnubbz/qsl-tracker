@@ -22,6 +22,14 @@
         <button type="submit">Upload &amp; look up</button>
       </form>
     </div>
+    <p class="muted" style="margin-top: 1rem;">
+      This page only shows an address when QRZ marks the station as
+      accepting a direct card. Already know a station wants a card even
+      though QRZ doesn't say so (a contest exchange, say)?
+      <a href="{{ url_for('raw_address') }}">Raw Address Ripper</a> pulls
+      whatever address QRZ has on file, no gating, and gives you real
+      print-ready PDF labels instead of a CSV export.
+    </p>
   </section>
 
   <section class="card">

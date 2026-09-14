@@ -351,6 +351,328 @@ def clear():
     return redirect(url_for("dashboard"))
 
 
+@app.route("/raw-address")
+def raw_address():
+    """Public Raw Address Ripper: any visitor, logged in with their own
+    QRZ XML subscriber account (same login as the regular Dashboard --
+    see qrz_key_or_none()/current_auth() and /login above), can look up
+    one callsign or bulk-upload an ADIF log (see raw_address_adif_batch()
+    below) and get whatever mailing address QRZ has on file, regardless
+    of accepts_direct -- the same idea as the admin-only Raw Address
+    Ripper (admin_raw_address() further down, Josh's own version), just
+    self-service for any ham instead of gated behind Josh's admin login.
+
+    **Nothing here is ever written to SQLite or S3.** The batch lives
+    only in this visitor's own signed session cookie -- the same
+    minimal {callsign, name, position} shape every batch route in this
+    app already uses, re-fetched fresh from QRZ at print time, never an
+    address snapshot. This is actually *stricter* than the regular
+    Dashboard, whose `contacts` table does keep accepts_direct addresses
+    in SQLite for the length of the browser session (see db.py) --
+    deliberate, since this page shows addresses regardless of consent
+    and Josh specifically didn't want any of it landing in his own
+    storage."""
+    if not qrz_key_or_none():
+        flash("Log in with your QRZ credentials first.", "error")
+        return redirect(url_for("index"))
+
+    callsign = request.args.get("callsign", "").strip().upper()
+    position = labels.clamp_mailing_position(_parse_int(request.args.get("position"), default=1))
+    record = None
+    error = None
+
+    if callsign:
+        key = qrz_key_or_none()
+        try:
+            record = lookup_callsign_raw(key, callsign)
+            if not record.address:
+                error = f"QRZ has no address on file at all for {record.callsign}."
+                record = None
+        except QrzError as exc:
+            error = f"QRZ lookup failed: {exc}"
+        except Exception:
+            error = "Couldn't reach QRZ right now. Try again in a moment."
+
+    batch = session.get("public_raw_batch", [])
+    batch_used_positions = {b["position"] for b in batch}
+    auth = current_auth()
+    return render_template(
+        "raw_address.html",
+        callsign=callsign,
+        position=position,
+        label_count=labels.MAILING_LABEL_COUNT,
+        record=record,
+        label_lines=labels.label_lines(record) if record else [],
+        error=error,
+        batch=batch,
+        batch_full=len(batch) >= labels.MAILING_LABEL_COUNT,
+        next_batch_position=_next_free_position(batch_used_positions, labels.MAILING_LABEL_COUNT),
+        adif_upload_cap=MAX_LOOKUPS_PER_UPLOAD,
+        qrz_username=auth["qrz_username"] if auth else None,
+    )
+
+
+@app.route("/raw-address/pdf")
+def raw_address_pdf():
+    callsign = request.args.get("callsign", "").strip().upper()
+    position = labels.clamp_mailing_position(_parse_int(request.args.get("position"), default=1))
+    if not callsign:
+        abort(400)
+
+    key = qrz_key_or_none()
+    if not key:
+        abort(401)
+
+    try:
+        record = lookup_callsign_raw(key, callsign)
+    except QrzError:
+        abort(404)
+    except Exception:
+        abort(502)
+
+    if not record.address:
+        abort(404)
+
+    pdf_bytes = labels.generate_mailing_label_pdf(record, position)
+    filename = f"qsl-raw-address-{record.callsign}.pdf"
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@app.route("/raw-address/batch/add", methods=["POST"])
+def raw_address_batch_add():
+    """Add one address to the visitor's own raw-address batch (see
+    raw_address() above) at a chosen position -- same shape as
+    admin_raw_address_batch_add(), just public and scoped to this
+    visitor's own session key (`public_raw_batch`, kept entirely
+    separate from Josh's own `raw_address_batch` so the two can never
+    collide, including if Josh himself is browsing logged in as both
+    admin and a regular visitor in the same browser)."""
+    callsign = request.form.get("callsign", "").strip().upper()
+    position = labels.clamp_mailing_position(_parse_int(request.form.get("position"), default=1))
+    redirect_to = _safe_next(url_for("raw_address", callsign=callsign, position=position))
+
+    key = qrz_key_or_none()
+    if not key:
+        flash("Log in with your QRZ credentials first.", "error")
+        return redirect(url_for("index"))
+
+    if not callsign:
+        flash("Enter a callsign to add.", "error")
+        return redirect(redirect_to)
+
+    try:
+        record = lookup_callsign_raw(key, callsign)
+    except QrzError as exc:
+        flash(f"QRZ lookup failed: {exc}", "error")
+        return redirect(redirect_to)
+    except Exception:
+        flash("Couldn't reach QRZ right now. Try again in a moment.", "error")
+        return redirect(redirect_to)
+
+    if not record.address:
+        flash(f"QRZ has no address on file at all for {record.callsign} -- not added.", "error")
+        return redirect(redirect_to)
+
+    batch = session.get("public_raw_batch", [])
+    if len(batch) >= labels.MAILING_LABEL_COUNT:
+        flash(
+            f"That sheet is full ({labels.MAILING_LABEL_COUNT} of "
+            f"{labels.MAILING_LABEL_COUNT} positions used) -- remove one, or "
+            "download/clear the batch first.",
+            "error",
+        )
+    elif any(b["position"] == position for b in batch):
+        flash(
+            f"Position {position} is already used in this batch -- pick a "
+            "different position, or remove that item first.",
+            "error",
+        )
+    else:
+        batch.append({"callsign": record.callsign, "name": record.name, "position": position})
+        session["public_raw_batch"] = batch
+        flash(f"Added {record.callsign} at position {position}.", "success")
+
+    return redirect(redirect_to)
+
+
+@app.route("/raw-address/batch/remove", methods=["POST"])
+def raw_address_batch_remove():
+    position = _parse_int(request.form.get("position"), default=0)
+    batch = session.get("public_raw_batch", [])
+    session["public_raw_batch"] = [b for b in batch if b["position"] != position]
+    return redirect(_safe_next(url_for("raw_address")))
+
+
+@app.route("/raw-address/batch/clear", methods=["POST"])
+def raw_address_batch_clear():
+    session.pop("public_raw_batch", None)
+    return redirect(_safe_next(url_for("raw_address")))
+
+
+@app.route("/raw-address/batch/pdf")
+def raw_address_batch_pdf():
+    """One combined PDF with every address currently in this visitor's
+    own raw-address batch -- same idea as admin_raw_address_batch_pdf(),
+    re-fetching each entry fresh from QRZ at print time rather than
+    printing a stale snapshot."""
+    batch = session.get("public_raw_batch", [])
+    if not batch:
+        abort(400)
+
+    key = qrz_key_or_none()
+    if not key:
+        abort(401)
+
+    items = []
+    dropped = []
+    for entry in batch:
+        try:
+            record = lookup_callsign_raw(key, entry["callsign"])
+        except Exception:
+            dropped.append(entry["callsign"])
+            continue
+        if not record.address:
+            dropped.append(entry["callsign"])
+            continue
+        items.append((record, entry["position"]))
+
+    if not items:
+        abort(404)
+
+    if dropped:
+        flash(
+            "Skipped in this print (QRZ has no address on file at all): "
+            + ", ".join(dropped),
+            "error",
+        )
+
+    pdf_bytes = labels.generate_mailing_batch_pdf(items)
+    filename = f"qsl-raw-addresses-batch-{date.today().isoformat()}.pdf"
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@app.route("/raw-address/adif-batch", methods=["POST"])
+def raw_address_adif_batch():
+    """Public ADIF bulk-upload for Raw Address Ripper: any logged-in
+    visitor uploads their own log and every distinct callsign in it
+    (capped at MAX_LOOKUPS_PER_UPLOAD, same cap the existing /upload
+    route already uses) gets a raw QRZ lookup, added straight to their
+    own batch. Paced and circuit-broken exactly like /upload above
+    (LOOKUP_DELAY_SECONDS between requests so a big log doesn't hammer
+    QRZ, UPLOAD_TIME_BUDGET_SECONDS wall-clock cutoff, and
+    MAX_CONSECUTIVE_FAILURES to bail out of an apparent QRZ outage early)
+    since this runs on a real public request, not Josh's own trusted
+    admin session. Stops adding once the sheet is full (30 positions)
+    without even calling QRZ for anything past that point.
+
+    Same storage guarantee as the rest of this feature: the uploaded
+    file and every parsed QSO exist only for this one request and are
+    never written anywhere -- only the minimal batch entries land in
+    the visitor's own session."""
+    redirect_to = _safe_next(url_for("raw_address"))
+
+    key = qrz_key_or_none()
+    if not key:
+        flash("Log in with your QRZ credentials first.", "error")
+        return redirect(url_for("index"))
+
+    file_storage = request.files.get("adif_file")
+    if not file_storage or not file_storage.filename:
+        flash("Choose an ADIF (.adi/.adif) file to upload.", "error")
+        return redirect(redirect_to)
+
+    try:
+        text = file_storage.read().decode("utf-8", errors="replace")
+    except Exception:
+        flash("Couldn't read that file -- is it a text ADIF export?", "error")
+        return redirect(redirect_to)
+
+    callsigns = distinct_callsigns(parse_adif(text))[:MAX_LOOKUPS_PER_UPLOAD]
+
+    if not callsigns:
+        flash(f"No callsigns found in {file_storage.filename} -- is it a valid ADIF log?", "error")
+        return redirect(redirect_to)
+
+    batch = session.get("public_raw_batch", [])
+    used_positions = {b["position"] for b in batch}
+    already_batched = {b["callsign"] for b in batch}
+
+    added, no_address, lookup_failed, duplicates, sheet_full = [], [], [], [], []
+    consecutive_failures = 0
+    stopped_early = None
+    started_at = time.monotonic()
+
+    for i, callsign in enumerate(callsigns):
+        if time.monotonic() - started_at > UPLOAD_TIME_BUDGET_SECONDS:
+            stopped_early = "ran out of time for this request"
+            break
+        if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+            stopped_early = "QRZ failed several times in a row"
+            break
+
+        if callsign in already_batched:
+            duplicates.append(callsign)
+        else:
+            position = _next_free_position(used_positions, labels.MAILING_LABEL_COUNT)
+            if position is None:
+                sheet_full.append(callsign)
+            else:
+                try:
+                    record = lookup_callsign_raw(key, callsign)
+                except QrzError:
+                    lookup_failed.append(callsign)
+                    consecutive_failures += 1
+                except Exception:
+                    lookup_failed.append(callsign)
+                    consecutive_failures += 1
+                else:
+                    consecutive_failures = 0
+                    if not record.address:
+                        no_address.append(callsign)
+                    else:
+                        batch.append({"callsign": record.callsign, "name": record.name, "position": position})
+                        used_positions.add(position)
+                        already_batched.add(record.callsign)
+                        added.append(record.callsign)
+
+        if i < len(callsigns) - 1:
+            time.sleep(LOOKUP_DELAY_SECONDS)
+
+    session["public_raw_batch"] = batch
+
+    summary = [f"{file_storage.filename}: {len(callsigns)} distinct callsign(s) found."]
+    if added:
+        summary.append(f"Added {len(added)} to the batch: {', '.join(added)}.")
+    if no_address:
+        summary.append(f"No address on file for {len(no_address)}: {', '.join(no_address)}.")
+    if lookup_failed:
+        summary.append(f"QRZ lookup failed for {len(lookup_failed)}: {', '.join(lookup_failed)}.")
+    if duplicates:
+        summary.append(f"Already in the batch, skipped: {', '.join(duplicates)}.")
+    if sheet_full:
+        summary.append(
+            f"Sheet is full ({labels.MAILING_LABEL_COUNT} of {labels.MAILING_LABEL_COUNT}), "
+            f"not added: {', '.join(sheet_full)}."
+        )
+    if stopped_early:
+        remaining = len(callsigns) - (len(added) + len(no_address) + len(lookup_failed) + len(duplicates) + len(sheet_full))
+        summary.append(
+            f"Stopped early ({stopped_early}) -- {remaining} callsign(s) not attempted. "
+            "Upload the log again to pick up more (already-added ones will just show as duplicates)."
+        )
+
+    flash(" ".join(summary), "success" if added else "error")
+    return redirect(redirect_to)
+
+
 @app.route("/request-qsl", methods=["GET", "POST"])
 def request_qsl():
     """Public, unauthenticated form (embedded on kn0ble.com) for a

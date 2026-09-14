@@ -1,45 +1,45 @@
 {% extends "base.html" %}
-{% block title %}Raw Address Ripper (admin){% endblock %}
+{% block title %}Raw Address Ripper{% endblock %}
 {% block content %}
   <section class="card">
     <div class="dashboard-top">
-      <h1>Raw Address Ripper (admin)</h1>
-      <form method="post" action="{{ url_for('admin_logout') }}">
-        <button type="submit" class="link-button">Log out (admin)</button>
+      <h1>Raw Address Ripper</h1>
+      <p>Logged in to QRZ as <strong>{{ qrz_username }}</strong>.</p>
+      <form method="post" action="{{ url_for('logout') }}">
+        <button type="submit" class="link-button">Log out</button>
       </form>
     </div>
     <p class="muted">
       Look up a callsign against QRZ and get whatever mailing address is on
       file &mdash; <strong>regardless of whether they've marked it available
       for a direct card.</strong> The regular
-      <a href="{{ url_for('admin_label') }}">mailing label</a> lookup hides
-      the address unless QRZ shows an explicit accept (or at least no
-      opt-out), which is right for "who volunteered a direct card" but
-      useless when a contest exchange, an on-air request, or a club roster
-      already told you a station wants a card &mdash; their QRZ page just
-      never says "direct" anywhere. Same print-ready PDF, sized for one cell
-      of an Avery 8160 / 5160 / 5260 sheet (1"&times;2-5/8", 30 per page, 3
-      columns &times; 10 rows), as the regular mailing label.
+      <a href="{{ url_for('dashboard') }}">Dashboard</a> hides an address
+      unless QRZ shows an explicit accept (or at least no opt-out), which is
+      right for "who volunteered a direct card" but useless when a contest
+      exchange, an on-air request, or a club roster already told you a
+      station wants a card &mdash; their QRZ page just never says "direct"
+      anywhere. Real print-ready PDF labels, sized for one cell of an Avery
+      8160 / 5160 / 5260 sheet (1"&times;2-5/8", 30 per page, 3 columns
+      &times; 10 rows). <strong>Nothing you look up or upload here is ever
+      saved</strong> &mdash; not the address, not your ADIF file, not the
+      callsign list. It's re-fetched from QRZ fresh every time and lives
+      only in your own browser session.
     </p>
   </section>
 
   <section class="card">
-    <h1>Bulk-add from an ADIF log</h1>
+    <h1>Bulk-add from your ADIF log</h1>
     <p class="muted">
-      Upload an ADIF (.adi/.adif) export &mdash; a contest session's worth
-      of QSOs is exactly what this is for &mdash; and every distinct
-      callsign in it gets a raw QRZ lookup, added straight to the batch
-      below. <strong>The file itself is never saved anywhere</strong>: it's
-      parsed in memory for this one upload and forgotten immediately after
-      &mdash; unlike the QSL Photo Map's ADIF import, nothing here gets
-      written to S3, so this won't add to your bucket. Capped at
-      {{ raw_adif_max_callsigns }} distinct callsigns per upload (each one
-      is its own live QRZ request) and whatever room is left on the current
-      30-position sheet &mdash; a callsign with no address on file, a failed
+      Upload an ADIF (.adi/.adif) export from your own logging software and
+      every distinct callsign in it gets a raw QRZ lookup, added straight to
+      the batch below &mdash; handy right after a contest, when you've got a
+      stack of cards to send out. Capped at {{ adif_upload_cap }} distinct
+      callsigns per upload and whatever room is left on the current
+      30-position sheet; a callsign with no address on file, a failed
       lookup, or one already in the batch is skipped and called out by name
       rather than blocking the rest.
     </p>
-    <form method="post" action="{{ url_for('admin_raw_address_adif_batch') }}" enctype="multipart/form-data">
+    <form method="post" action="{{ url_for('raw_address_adif_batch') }}" enctype="multipart/form-data">
       <label for="adif_file">ADIF file</label>
       <input type="file" id="adif_file" name="adif_file" accept=".adi,.adif,text/plain" required>
       <button type="submit">Rip addresses from this log</button>
@@ -48,7 +48,7 @@
 
   <section class="card">
     <h1>Or look up one callsign</h1>
-    <form method="get" action="{{ url_for('admin_raw_address') }}" id="raw-address-form">
+    <form method="get" action="{{ url_for('raw_address') }}" id="raw-address-form">
       <label for="callsign">Callsign</label>
       <input type="text" id="callsign" name="callsign" value="{{ callsign }}" placeholder="e.g. W1AW" required>
 
@@ -75,9 +75,7 @@
       <p class="muted">
         Everything below prints together on one sheet, each at its own
         position &mdash; nothing else on the sheet is touched. Addresses
-        are re-fetched from QRZ fresh at print time, never saved here. This
-        batch is separate from the regular mailing-label batch on
-        <a href="{{ url_for('admin_label') }}">Print Mailing Label</a>.
+        are re-fetched from QRZ fresh at print time, never saved anywhere.
       </p>
       <table class="contacts">
         <thead>
@@ -90,7 +88,7 @@
               <td>{{ b.callsign }}</td>
               <td>{{ b.name or '-' }}</td>
               <td>
-                <form method="post" action="{{ url_for('admin_raw_address_batch_remove') }}" style="display: inline;">
+                <form method="post" action="{{ url_for('raw_address_batch_remove') }}" style="display: inline;">
                   <input type="hidden" name="position" value="{{ b.position }}">
                   <button type="submit" class="link-button">Remove</button>
                 </form>
@@ -100,9 +98,9 @@
         </tbody>
       </table>
       <p style="margin-top: 1rem;">
-        <a class="button-link" href="{{ url_for('admin_raw_address_batch_pdf') }}" target="_blank" rel="noopener">Download batch PDF ({{ batch | length }} label{{ 's' if batch | length != 1 else '' }})</a>
+        <a class="button-link" href="{{ url_for('raw_address_batch_pdf') }}" target="_blank" rel="noopener">Download batch PDF ({{ batch | length }} label{{ 's' if batch | length != 1 else '' }})</a>
         &nbsp;
-        <form method="post" action="{{ url_for('admin_raw_address_batch_clear') }}" style="display: inline;">
+        <form method="post" action="{{ url_for('raw_address_batch_clear') }}" style="display: inline;">
           <button type="submit" class="link-button">Clear batch</button>
         </form>
       </p>
@@ -129,14 +127,14 @@
       </div>
       <p class="muted" style="margin-top: 1rem;">
         Position {{ position }} of {{ label_count }} on the Avery 8160/5160/5260
-        layout. Sourced from QRZ just now &mdash; not saved anywhere in QSL Tracker.
+        layout. Sourced from QRZ just now &mdash; not saved anywhere.
       </p>
       <a class="button-link"
-         href="{{ url_for('admin_raw_address_pdf', callsign=record.callsign, position=position) }}"
+         href="{{ url_for('raw_address_pdf', callsign=record.callsign, position=position) }}"
          target="_blank" rel="noopener">Download PDF label</a>
 
       {% if not batch_full %}
-        <form method="post" action="{{ url_for('admin_raw_address_batch_add') }}" style="margin-top: 1rem;">
+        <form method="post" action="{{ url_for('raw_address_batch_add') }}" style="margin-top: 1rem;">
           <input type="hidden" name="callsign" value="{{ record.callsign }}">
           <label for="batch-position">Or add this one to the batch at position</label>
           <select id="batch-position" name="position">
