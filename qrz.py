@@ -221,6 +221,84 @@ def lookup_callsign(session_key: str, callsign: str) -> QrzRecord:
     )
 
 
+def lookup_callsign_raw(session_key: str, callsign: str) -> QrzRecord:
+    """Look up one callsign and return whatever mailing address QRZ has
+    on file, full stop -- unlike lookup_callsign() above, which discards
+    the address entirely unless accepts_direct is true.
+
+    Built for "Raw Address Ripper": a contest exchange (or any other
+    off-QRZ arrangement -- an on-air request, a club roster) can
+    establish that a station wants a card mailed to them even though
+    their QRZ page never says "direct" anywhere. An explicit opt-out
+    (mqsl == "0"), a blank mqsl (the common case -- most operators never
+    set it either way), or a QSL-manager note all hide the address on
+    the regular lookup_callsign()/admin_label() flow -- correctly, for
+    "who has volunteered a direct card" -- but none of them mean QRZ
+    doesn't *have* an address on file for the operator. This returns
+    that address whenever one exists, with no gating on any of it.
+
+    Still computes `accepts_direct` the exact same way lookup_callsign()
+    does, so a caller can show a "heads up, QRZ doesn't have this one
+    marked as accepting direct" note without a second lookup -- it just
+    no longer controls whether the address fields get populated.
+    Raises QrzError for a QRZ-side error or an unknown callsign, same as
+    lookup_callsign()."""
+    resp = requests.get(
+        QRZ_XML_URL,
+        params={"s": session_key, "callsign": callsign},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    root = ET.fromstring(resp.text)
+
+    session = root.find("qrz:Session", NS)
+    if session is not None:
+        error = _text(session, "Error")
+        if error:
+            raise QrzError(error)
+
+    callsign_el = root.find("qrz:Callsign", NS)
+    if callsign_el is None:
+        raise QrzError(f"No QRZ record found for {callsign}.")
+
+    mqsl_raw = _text(callsign_el, "mqsl")
+    mqsl = mqsl_raw == "1"
+    eqsl = _text(callsign_el, "eqsl") == "1"
+    lotw = _text(callsign_el, "lotw") == "1"
+    qslmgr = _text(callsign_el, "qslmgr")
+    has_address = bool(_text(callsign_el, "addr1"))
+
+    # Same "is this actually a manager, or just free text that mentions
+    # direct" logic as lookup_callsign() -- kept only to compute
+    # accepts_direct below for display, never to gate the address itself.
+    qslmgr_lower = qslmgr.lower()
+    negates_direct = "no direct" in qslmgr_lower or "not direct" in qslmgr_lower
+    mentions_direct = "direct" in qslmgr_lower and not negates_direct
+    has_manager = bool(qslmgr) and not mentions_direct
+    accepts_direct = has_address and mqsl_raw != "0" and not has_manager
+
+    # The only gate here at all: QRZ actually has to have an address on
+    # file. mqsl/has_manager don't touch these fields the way they do
+    # in lookup_callsign() above.
+    return QrzRecord(
+        callsign=_text(callsign_el, "call") or callsign.upper(),
+        name=" ".join(
+            p for p in (_text(callsign_el, "fname"), _text(callsign_el, "name")) if p
+        ),
+        address=_text(callsign_el, "addr1"),
+        city=_text(callsign_el, "addr2"),
+        state=_text(callsign_el, "state"),
+        zip_code=_text(callsign_el, "zip"),
+        country=_text(callsign_el, "country"),
+        grid=_text(callsign_el, "grid"),
+        mqsl=mqsl,
+        eqsl=eqsl,
+        lotw=lotw,
+        qsl_via=qslmgr,
+        accepts_direct=accepts_direct,
+    )
+
+
 def lookup_location(session_key: str, callsign: str) -> QrzLocation:
     """Look up just country/state/county/grid/lat/lon for a callsign --
     see QrzLocation above for why this is separate from lookup_callsign()."""

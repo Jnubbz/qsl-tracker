@@ -32,6 +32,7 @@ from qrz import (
     format_mailing_label,
     get_session_key,
     lookup_callsign,
+    lookup_callsign_raw,
     lookup_location,
 )
 from s3 import S3Error, delete_object, get_object_bytes, upload_card_image
@@ -647,6 +648,209 @@ def admin_label_batch_pdf():
 
     pdf_bytes = labels.generate_mailing_batch_pdf(items)
     filename = f"qsl-labels-batch-{date.today().isoformat()}.pdf"
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@app.route("/admin/raw-address")
+@admin_required
+def admin_raw_address():
+    """Raw Address Ripper: look up a callsign and show whatever mailing
+    address QRZ has on file, full stop -- no accepts_direct gating (see
+    qrz.lookup_callsign_raw()). Built for contests: an exchange (SASE
+    requested, no QSL manager, "direct" never actually written anywhere
+    on the page) still means a card needs to go out, and QRZ often has a
+    perfectly good address on file even when the operator never ticked
+    mqsl or mentioned direct at all. Same Avery 8160 label format and
+    PDF renderer as the regular mailing label (see admin_label() above),
+    and its own separate batch (`raw_address_batch`) so a contest's
+    worth of raw lookups doesn't collide with the regular
+    already-vetted-as-direct batch on /admin/label."""
+    callsign = request.args.get("callsign", "").strip().upper()
+    position = labels.clamp_mailing_position(_parse_int(request.args.get("position"), default=1))
+    record = None
+    error = None
+
+    if callsign:
+        key = qrz_key_or_none()
+        if not key:
+            return redirect(
+                url_for(
+                    "admin_login",
+                    next=url_for("admin_raw_address", callsign=callsign, position=position),
+                )
+            )
+        try:
+            record = lookup_callsign_raw(key, callsign)
+            if not record.address:
+                error = f"QRZ has no address on file at all for {record.callsign}."
+                record = None
+        except QrzError as exc:
+            error = f"QRZ lookup failed: {exc}"
+        except Exception:
+            error = "Couldn't reach QRZ right now. Try again in a moment."
+
+    batch = session.get("raw_address_batch", [])
+    batch_used_positions = {b["position"] for b in batch}
+    return render_template(
+        "admin_raw_address.html",
+        callsign=callsign,
+        position=position,
+        label_count=labels.MAILING_LABEL_COUNT,
+        record=record,
+        label_lines=labels.label_lines(record) if record else [],
+        error=error,
+        batch=batch,
+        batch_full=len(batch) >= labels.MAILING_LABEL_COUNT,
+        next_batch_position=_next_free_position(batch_used_positions, labels.MAILING_LABEL_COUNT),
+    )
+
+
+@app.route("/admin/raw-address/pdf")
+@admin_required
+def admin_raw_address_pdf():
+    callsign = request.args.get("callsign", "").strip().upper()
+    position = labels.clamp_mailing_position(_parse_int(request.args.get("position"), default=1))
+    if not callsign:
+        abort(400)
+
+    key = qrz_key_or_none()
+    if not key:
+        abort(401)
+
+    try:
+        record = lookup_callsign_raw(key, callsign)
+    except QrzError:
+        abort(404)
+    except Exception:
+        abort(502)
+
+    if not record.address:
+        abort(404)
+
+    pdf_bytes = labels.generate_mailing_label_pdf(record, position)
+    filename = f"qsl-raw-address-{record.callsign}.pdf"
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@app.route("/admin/raw-address/batch/add", methods=["POST"])
+@admin_required
+def admin_raw_address_batch_add():
+    """Add one address to the raw-address batch (see admin_raw_address()
+    above) at a Josh-chosen position -- same shape as
+    admin_label_batch_add(), just backed by lookup_callsign_raw() so a
+    missing "direct" flag never blocks the add."""
+    callsign = request.form.get("callsign", "").strip().upper()
+    position = labels.clamp_mailing_position(_parse_int(request.form.get("position"), default=1))
+    redirect_to = _safe_next(url_for("admin_raw_address", callsign=callsign, position=position))
+
+    if not callsign:
+        flash("Enter a callsign to add.", "error")
+        return redirect(redirect_to)
+
+    key = qrz_key_or_none()
+    if not key:
+        return redirect(url_for("admin_login", next=redirect_to))
+
+    try:
+        record = lookup_callsign_raw(key, callsign)
+    except QrzError as exc:
+        flash(f"QRZ lookup failed: {exc}", "error")
+        return redirect(redirect_to)
+    except Exception:
+        flash("Couldn't reach QRZ right now. Try again in a moment.", "error")
+        return redirect(redirect_to)
+
+    if not record.address:
+        flash(f"QRZ has no address on file at all for {record.callsign} -- not added.", "error")
+        return redirect(redirect_to)
+
+    batch = session.get("raw_address_batch", [])
+    if len(batch) >= labels.MAILING_LABEL_COUNT:
+        flash(
+            f"That sheet is full ({labels.MAILING_LABEL_COUNT} of "
+            f"{labels.MAILING_LABEL_COUNT} positions used) -- remove one, or "
+            "download/clear the batch first.",
+            "error",
+        )
+    elif any(b["position"] == position for b in batch):
+        flash(
+            f"Position {position} is already used in this batch -- pick a "
+            "different position, or remove that item first.",
+            "error",
+        )
+    else:
+        batch.append({"callsign": record.callsign, "name": record.name, "position": position})
+        session["raw_address_batch"] = batch
+        flash(f"Added {record.callsign} at position {position}.", "success")
+
+    return redirect(redirect_to)
+
+
+@app.route("/admin/raw-address/batch/remove", methods=["POST"])
+@admin_required
+def admin_raw_address_batch_remove():
+    position = _parse_int(request.form.get("position"), default=0)
+    batch = session.get("raw_address_batch", [])
+    session["raw_address_batch"] = [b for b in batch if b["position"] != position]
+    return redirect(_safe_next(url_for("admin_raw_address")))
+
+
+@app.route("/admin/raw-address/batch/clear", methods=["POST"])
+@admin_required
+def admin_raw_address_batch_clear():
+    session.pop("raw_address_batch", None)
+    return redirect(_safe_next(url_for("admin_raw_address")))
+
+
+@app.route("/admin/raw-address/batch/pdf")
+@admin_required
+def admin_raw_address_batch_pdf():
+    """One combined PDF with every address currently in the raw-address
+    batch, each at its own chosen position -- same idea as
+    admin_label_batch_pdf(), backed by lookup_callsign_raw() so a
+    station with no "direct" flag set doesn't silently get dropped from
+    the batch the way it would on the regular mailing-label batch."""
+    batch = session.get("raw_address_batch", [])
+    if not batch:
+        abort(400)
+
+    key = qrz_key_or_none()
+    if not key:
+        abort(401)
+
+    items = []
+    dropped = []
+    for entry in batch:
+        try:
+            record = lookup_callsign_raw(key, entry["callsign"])
+        except Exception:
+            dropped.append(entry["callsign"])
+            continue
+        if not record.address:
+            dropped.append(entry["callsign"])
+            continue
+        items.append((record, entry["position"]))
+
+    if not items:
+        abort(404)
+
+    if dropped:
+        flash(
+            "Skipped in this print (QRZ has no address on file at all): "
+            + ", ".join(dropped),
+            "error",
+        )
+
+    pdf_bytes = labels.generate_mailing_batch_pdf(items)
+    filename = f"qsl-raw-addresses-batch-{date.today().isoformat()}.pdf"
     return Response(
         pdf_bytes,
         mimetype="application/pdf",

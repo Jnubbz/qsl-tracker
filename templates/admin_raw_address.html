@@ -1,31 +1,28 @@
 {% extends "base.html" %}
-{% block title %}Print Mailing Label{% endblock %}
+{% block title %}Raw Address Ripper{% endblock %}
 {% block content %}
   <section class="card">
     <div class="dashboard-top">
-      <h1>Print a QSL mailing label</h1>
+      <h1>Raw Address Ripper</h1>
       <form method="post" action="{{ url_for('admin_logout') }}">
         <button type="submit" class="link-button">Log out (admin)</button>
       </form>
     </div>
     <p class="muted">
-      Look up a callsign against QRZ and, if they have a mailing address on
-      file for a direct card, get a print-ready PDF sized for one cell of an
-      Avery 8160 / 5160 / 5260 sheet (1"&times;2-5/8", 30 per page, 3 columns
-      &times; 10 rows). Only the position(s) you pick get filled in, so you can
-      keep using a partially-used sheet. Looking for QSO details (band,
-      mode, RST) to stick on the card itself instead?
-      <a href="{{ url_for('admin_qso_label') }}">Print a QSO label</a>.
-      Want to add several addresses by country instead of one callsign
-      at a time?
-      <a href="{{ url_for('admin_qsos') }}">Browse logged QSOs by DXCC entity</a>.
-      Already know a station wants a card even though QRZ doesn't show them
-      as accepting one direct (a contest exchange, say)?
-      <a href="{{ url_for('admin_raw_address') }}">Raw Address Ripper</a>
-      pulls whatever address QRZ has on file, no gating.
+      Look up a callsign against QRZ and get whatever mailing address is on
+      file &mdash; <strong>regardless of whether they've marked it available
+      for a direct card.</strong> The regular
+      <a href="{{ url_for('admin_label') }}">mailing label</a> lookup hides
+      the address unless QRZ shows an explicit accept (or at least no
+      opt-out), which is right for "who volunteered a direct card" but
+      useless when a contest exchange, an on-air request, or a club roster
+      already told you a station wants a card &mdash; their QRZ page just
+      never says "direct" anywhere. Same print-ready PDF, sized for one cell
+      of an Avery 8160 / 5160 / 5260 sheet (1"&times;2-5/8", 30 per page, 3
+      columns &times; 10 rows), as the regular mailing label.
     </p>
 
-    <form method="get" action="{{ url_for('admin_label') }}" id="label-form">
+    <form method="get" action="{{ url_for('admin_raw_address') }}" id="raw-address-form">
       <label for="callsign">Callsign</label>
       <input type="text" id="callsign" name="callsign" value="{{ callsign }}" placeholder="e.g. W1AW" required autofocus>
 
@@ -52,7 +49,9 @@
       <p class="muted">
         Everything below prints together on one sheet, each at its own
         position &mdash; nothing else on the sheet is touched. Addresses
-        are re-fetched from QRZ fresh at print time, never saved here.
+        are re-fetched from QRZ fresh at print time, never saved here. This
+        batch is separate from the regular mailing-label batch on
+        <a href="{{ url_for('admin_label') }}">Print Mailing Label</a>.
       </p>
       <table class="contacts">
         <thead>
@@ -65,7 +64,7 @@
               <td>{{ b.callsign }}</td>
               <td>{{ b.name or '-' }}</td>
               <td>
-                <form method="post" action="{{ url_for('admin_label_batch_remove') }}" style="display: inline;">
+                <form method="post" action="{{ url_for('admin_raw_address_batch_remove') }}" style="display: inline;">
                   <input type="hidden" name="position" value="{{ b.position }}">
                   <button type="submit" class="link-button">Remove</button>
                 </form>
@@ -75,9 +74,9 @@
         </tbody>
       </table>
       <p style="margin-top: 1rem;">
-        <a class="button-link" href="{{ url_for('admin_label_batch_pdf') }}" target="_blank" rel="noopener">Download batch PDF ({{ batch | length }} label{{ 's' if batch | length != 1 else '' }})</a>
+        <a class="button-link" href="{{ url_for('admin_raw_address_batch_pdf') }}" target="_blank" rel="noopener">Download batch PDF ({{ batch | length }} label{{ 's' if batch | length != 1 else '' }})</a>
         &nbsp;
-        <form method="post" action="{{ url_for('admin_label_batch_clear') }}" style="display: inline;">
+        <form method="post" action="{{ url_for('admin_raw_address_batch_clear') }}" style="display: inline;">
           <button type="submit" class="link-button">Clear batch</button>
         </form>
       </p>
@@ -87,6 +86,16 @@
   {% if record %}
     <section class="card">
       <h1>Preview</h1>
+      {% if not record.accepts_direct %}
+        <p class="muted">
+          Heads up: QRZ doesn't have {{ record.callsign }} marked as
+          accepting a direct card
+          {%- if record.qsl_via %} &mdash; their QRZ page lists a QSL
+          note/manager: &ldquo;{{ record.qsl_via }}&rdquo;{% endif %}.
+          Raw Address Ripper shows the address on file anyway &mdash;
+          worth a second look before mailing if that matters for this one.
+        </p>
+      {% endif %}
       <div class="label-preview label-preview--8160">
         {% for text, font, size in label_lines %}
           <p class="{{ 'label-preview-header' if loop.first else 'label-preview-line' }}">{{ text }}</p>
@@ -97,11 +106,11 @@
         layout. Sourced from QRZ just now &mdash; not saved anywhere in QSL Tracker.
       </p>
       <a class="button-link"
-         href="{{ url_for('admin_label_pdf', callsign=record.callsign, position=position) }}"
+         href="{{ url_for('admin_raw_address_pdf', callsign=record.callsign, position=position) }}"
          target="_blank" rel="noopener">Download PDF label</a>
 
       {% if not batch_full %}
-        <form method="post" action="{{ url_for('admin_label_batch_add') }}" style="margin-top: 1rem;">
+        <form method="post" action="{{ url_for('admin_raw_address_batch_add') }}" style="margin-top: 1rem;">
           <input type="hidden" name="callsign" value="{{ record.callsign }}">
           <label for="batch-position">Or add this one to the batch at position</label>
           <select id="batch-position" name="position">
