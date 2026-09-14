@@ -21,10 +21,36 @@
       of an Avery 8160 / 5160 / 5260 sheet (1"&times;2-5/8", 30 per page, 3
       columns &times; 10 rows), as the regular mailing label.
     </p>
+  </section>
 
+  <section class="card">
+    <h1>Bulk-add from an ADIF log</h1>
+    <p class="muted">
+      Upload an ADIF (.adi/.adif) export &mdash; a contest session's worth
+      of QSOs is exactly what this is for &mdash; and every distinct
+      callsign in it gets a raw QRZ lookup, added straight to the batch
+      below. <strong>The file itself is never saved anywhere</strong>: it's
+      parsed in memory for this one upload and forgotten immediately after
+      &mdash; unlike the QSL Photo Map's ADIF import, nothing here gets
+      written to S3, so this won't add to your bucket. Capped at
+      {{ raw_adif_max_callsigns }} distinct callsigns per upload (each one
+      is its own live QRZ request) and whatever room is left on the current
+      30-position sheet &mdash; a callsign with no address on file, a failed
+      lookup, or one already in the batch is skipped and called out by name
+      rather than blocking the rest.
+    </p>
+    <form method="post" action="{{ url_for('admin_raw_address_adif_batch') }}" enctype="multipart/form-data">
+      <label for="adif_file">ADIF file</label>
+      <input type="file" id="adif_file" name="adif_file" accept=".adi,.adif,text/plain" required>
+      <button type="submit">Rip addresses from this log</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h1>Or look up one callsign</h1>
     <form method="get" action="{{ url_for('admin_raw_address') }}" id="raw-address-form">
       <label for="callsign">Callsign</label>
-      <input type="text" id="callsign" name="callsign" value="{{ callsign }}" placeholder="e.g. W1AW" required autofocus>
+      <input type="text" id="callsign" name="callsign" value="{{ callsign }}" placeholder="e.g. W1AW" required>
 
       <label for="position">Sheet position (1&ndash;{{ label_count }}, left-to-right, top-to-bottom)</label>
       <select id="position" name="position">

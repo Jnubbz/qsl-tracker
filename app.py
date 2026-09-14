@@ -81,6 +81,14 @@ MAX_CONSECUTIVE_FAILURES = 5
 QSL_REQUEST_RATE_LIMIT = 3
 QSL_REQUEST_RATE_WINDOW_SECONDS = 600
 
+# Safety cap for admin_raw_address_adif_batch() below -- each distinct
+# callsign in an uploaded ADIF is its own live QRZ lookup, and a
+# mailing sheet only holds MAILING_LABEL_COUNT (30) anyway, so there's
+# no good reason to let an accidentally-huge log (a full year's log
+# instead of one contest session) trigger hundreds of QRZ requests in
+# one page load.
+RAW_ADIF_MAX_CALLSIGNS = 40
+
 # Gates the QSL Photo Map's upload/import pages -- just Josh, not the
 # QRZ-login system the rest of the app uses (that's per-visitor and
 # anonymous; this is one person's admin area). Unset in an environment
@@ -706,6 +714,7 @@ def admin_raw_address():
         batch=batch,
         batch_full=len(batch) >= labels.MAILING_LABEL_COUNT,
         next_batch_position=_next_free_position(batch_used_positions, labels.MAILING_LABEL_COUNT),
+        raw_adif_max_callsigns=RAW_ADIF_MAX_CALLSIGNS,
     )
 
 
@@ -856,6 +865,116 @@ def admin_raw_address_batch_pdf():
         mimetype="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+@app.route("/admin/raw-address/adif-batch", methods=["POST"])
+@admin_required
+def admin_raw_address_adif_batch():
+    """Bulk-add to the raw-address batch straight from an uploaded ADIF
+    log -- built for a contest session's worth of callsigns (e.g. the
+    Route 66 QSO Party) instead of typing each one into the single
+    lookup form by hand, one at a time.
+
+    Deliberately **stays out of S3 entirely**: unlike the QSL Photo
+    Map's ADIF import (photomap_store.import_my_qsos(), which durably
+    stores every QSO it's ever given, forever, in the bucket), this
+    route reads the uploaded file, extracts distinct callsigns with
+    adif.py's existing parse_adif()/distinct_callsigns(), does one live
+    QRZ lookup per callsign, and then forgets the upload completely --
+    nothing about it (not the file, not the parsed QSOs, not the
+    addresses) is ever written anywhere. Only the same minimal
+    {callsign, name, position} entries every other batch route here
+    already stores land in the session.
+
+    Capped at RAW_ADIF_MAX_CALLSIGNS distinct callsigns per upload (see
+    that constant's comment) and at whatever room is actually left on
+    the sheet -- this is deliberately best-effort, not all-or-nothing
+    like the QSO-label checkbox batch add: a contest log realistically
+    mixes hits and misses (no address on file, a bad/unheard callsign,
+    a duplicate already in the batch), and Josh should still get
+    everything that *did* work rather than have one bad callsign block
+    the other 21. The flash message reports each outcome bucket by
+    name so nothing silently vanishes."""
+    file_storage = request.files.get("adif_file")
+    redirect_to = _safe_next(url_for("admin_raw_address"))
+
+    if not file_storage or not file_storage.filename:
+        flash("Choose an ADIF (.adi/.adif) file to upload.", "error")
+        return redirect(redirect_to)
+
+    try:
+        text = file_storage.read().decode("utf-8", errors="replace")
+    except Exception:
+        flash("Couldn't read that file -- is it a text ADIF export?", "error")
+        return redirect(redirect_to)
+
+    callsigns = distinct_callsigns(parse_adif(text))
+
+    if not callsigns:
+        flash(f"No callsigns found in {file_storage.filename} -- is it a valid ADIF log?", "error")
+        return redirect(redirect_to)
+
+    if len(callsigns) > RAW_ADIF_MAX_CALLSIGNS:
+        flash(
+            f"{file_storage.filename} has {len(callsigns)} distinct callsigns -- "
+            f"more than this tool processes in one upload ({RAW_ADIF_MAX_CALLSIGNS} "
+            "max, since each one is its own live QRZ lookup and a mailing sheet "
+            "only holds 30 anyway). Export or filter to just the session/contest "
+            "you need labels for and upload that instead.",
+            "error",
+        )
+        return redirect(redirect_to)
+
+    key = qrz_key_or_none()
+    if not key:
+        return redirect(url_for("admin_login", next=redirect_to))
+
+    batch = session.get("raw_address_batch", [])
+    used_positions = {b["position"] for b in batch}
+    already_batched = {b["callsign"] for b in batch}
+
+    added, no_address, lookup_failed, duplicates, sheet_full = [], [], [], [], []
+
+    for callsign in callsigns:
+        if callsign in already_batched:
+            duplicates.append(callsign)
+            continue
+        position = _next_free_position(used_positions, labels.MAILING_LABEL_COUNT)
+        if position is None:
+            sheet_full.append(callsign)
+            continue
+        try:
+            record = lookup_callsign_raw(key, callsign)
+        except Exception:
+            lookup_failed.append(callsign)
+            continue
+        if not record.address:
+            no_address.append(callsign)
+            continue
+        batch.append({"callsign": record.callsign, "name": record.name, "position": position})
+        used_positions.add(position)
+        already_batched.add(record.callsign)
+        added.append(record.callsign)
+
+    session["raw_address_batch"] = batch
+
+    summary = [f"{file_storage.filename}: {len(callsigns)} distinct callsign(s) found."]
+    if added:
+        summary.append(f"Added {len(added)} to the batch: {', '.join(added)}.")
+    if no_address:
+        summary.append(f"No address on file for {len(no_address)}: {', '.join(no_address)}.")
+    if lookup_failed:
+        summary.append(f"QRZ lookup failed for {len(lookup_failed)}: {', '.join(lookup_failed)}.")
+    if duplicates:
+        summary.append(f"Already in the batch, skipped: {', '.join(duplicates)}.")
+    if sheet_full:
+        summary.append(
+            f"Sheet is full ({labels.MAILING_LABEL_COUNT} of {labels.MAILING_LABEL_COUNT}), "
+            f"not added: {', '.join(sheet_full)}."
+        )
+
+    flash(" ".join(summary), "success" if added else "error")
+    return redirect(redirect_to)
 
 
 def _parse_int(raw: str | None, default: int) -> int:
