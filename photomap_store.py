@@ -277,10 +277,37 @@ def _dedupe_key(callsign, qso_date, band, mode, freq) -> tuple:
     return (callsign, qso_date or "", (band or "").upper(), (mode or "").upper(), _norm_freq(freq))
 
 
+def _minutes(time_on: str) -> int | None:
+    """ADIF time_on ("HHMM" or "HHMMSS") -> minutes after midnight UTC."""
+    t = (time_on or "").strip()
+    if len(t) < 4 or not t[:4].isdigit():
+        return None
+    return int(t[:2]) * 60 + int(t[2:4])
+
+
+def _find_same_qso(candidates: list[dict], time_on: str) -> dict | None:
+    """The stored row (among those sharing callsign/date/band/mode/freq)
+    that is the same contact as an incoming one with `time_on`. Times
+    within 2 minutes count as the same contact (a logger and QRZ can
+    round the start time differently); if either side has no time at
+    all, fall back to the old time-blind match so older imports without
+    times still dedupe instead of doubling."""
+    incoming = _minutes(time_on)
+    untimed = None
+    for row in candidates:
+        stored = _minutes(row.get("time_on", ""))
+        if incoming is None or stored is None:
+            untimed = untimed or row
+            continue
+        if abs(incoming - stored) <= 2 or abs(incoming - stored) >= 1438:  # wraps midnight
+            return row
+    return untimed
+
+
 def import_my_qsos(qsos: list) -> tuple[int, int]:
     """Bulk-add parsed ADIF QSOs (adif.AdifQso), skipping ones with no
     callsign. De-duplicates against (callsign, qso_date, band, mode,
-    freq) so re-uploading the same or an overlapping log is safe and
+    freq) plus time_on within 2 minutes (see _find_same_qso()) so re-uploading the same or an overlapping log is safe and
     won't create duplicates. Also backfills `time_on`/`gridsquare`/
     `dxcc_entity` onto an already-imported record that's missing any of
     them (older imports, from before those fields were captured, never
@@ -288,10 +315,15 @@ def import_my_qsos(qsos: list) -> tuple[int, int]:
     them up without creating a duplicate entry. Returns (added,
     backfilled) counts."""
     data = _load()
-    existing = {
-        _dedupe_key(q["callsign"], q.get("qso_date"), q.get("band"), q.get("mode"), q.get("freq")): q
-        for q in data["my_qsos"]
-    }
+    # Several real QSOs can share (callsign, date, band, mode, freq) --
+    # FT8 on one dial frequency, a POTA re-contact, a QSO-party rover --
+    # so each key holds a list, and time_on decides which (if any) is the
+    # same contact. See _find_same_qso().
+    existing: dict[tuple, list[dict]] = {}
+    for q in data["my_qsos"]:
+        existing.setdefault(
+            _dedupe_key(q["callsign"], q.get("qso_date"), q.get("band"), q.get("mode"), q.get("freq")), []
+        ).append(q)
 
     added = 0
     backfilled = 0
@@ -306,7 +338,7 @@ def import_my_qsos(qsos: list) -> tuple[int, int]:
         gridsquare = f.get("gridsquare", "")
         dxcc_entity = _entity_for(callsign, f.get("country", ""))
 
-        existing_row = existing.get(key)
+        existing_row = _find_same_qso(existing.get(key, []), time_on)
         if existing_row is not None:
             row_changed = False
             if time_on and not existing_row.get("time_on"):
@@ -343,7 +375,7 @@ def import_my_qsos(qsos: list) -> tuple[int, int]:
             "created_at": time.time(),
         }
         data["my_qsos"].append(new_row)
-        existing[key] = new_row
+        existing.setdefault(key, []).append(new_row)
         added += 1
 
     if added or backfilled:
@@ -418,8 +450,12 @@ def qrz_sync_state() -> dict:
 
 
 def save_qrz_sync_state(state: dict) -> None:
+    """Merge `state` into the saved sync state (keys not given are kept --
+    e.g. the last-seen QRZ total survives a mid-sync cursor save)."""
     data = _load()
-    data["qrz_sync"] = state
+    merged = dict(data.get("qrz_sync") or {})
+    merged.update(state)
+    data["qrz_sync"] = merged
     _save(data)
 
 

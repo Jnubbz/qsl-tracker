@@ -34,12 +34,21 @@
           Never synced yet.
         {% endif %}
       </p>
+      {% if sync_state.get('qrz_total') is not none %}
+        <p class="{{ 'flag-missing' if sync_state.qrz_total > qso_count else 'muted' }}">
+          QRZ Logbook: {{ sync_state.qrz_total }} QSOs &middot; this log: {{ qso_count }}
+          {%- if sync_state.qrz_total > qso_count %} &mdash; {{ sync_state.qrz_total - qso_count }} missing here.
+            Press "Re-sync everything" (and Sync again until it says up to date) to pull them in.
+          {%- elif sync_state.qrz_total == qso_count %} &mdash; they match.
+          {%- else %} &mdash; this log has QSOs QRZ doesn't (e.g. from an ADIF of contacts never uploaded to QRZ).{% endif %}
+        </p>
+      {% endif %}
       <form method="post" action="{{ url_for('admin_log_sync') }}" style="display: inline;">
         <button type="submit">Sync from QRZ</button>
       </form>
       {% if sync_state.get('last_sync') %}
         <form method="post" action="{{ url_for('admin_log_sync') }}" style="display: inline;"
-              onsubmit="return confirm('Re-read your whole QRZ Logbook from the start? Nothing gets duplicated; it just takes a few presses for a big log.');">
+              onsubmit="return confirm('Re-read your whole QRZ Logbook from the start? Nothing gets duplicated. A big log takes a few presses: after this one, keep pressing Sync until it says up to date.');">
           <input type="hidden" name="full" value="1">
           <button type="submit" class="link-button">Re-sync everything from the start</button>
         </form>

@@ -29,9 +29,11 @@ from qrz import (
     LOG_PAGE_SIZE,
     QrzError,
     fetch_log_page,
+    fetch_status,
     get_session_key,
     lookup_callsign_raw,
     lookup_location,
+    status_total_qsos,
 )
 from s3 import S3Error, delete_object, get_object_bytes, upload_card_image
 
@@ -99,6 +101,10 @@ QRZ_LOGBOOK_API_KEY = os.environ.get("QRZ_LOGBOOK_API_KEY", "")
 # request timeout in qrz.fetch_log_page()); the cursor is saved after
 # every page, so clicking Sync again just carries on from there.
 QRZ_SYNC_TIME_BUDGET_SECONDS = 12
+
+# After an incremental sync catches up, re-read this many recent days by
+# date too -- see admin_log_sync().
+QRZ_SYNC_RECENT_DAYS = 7
 
 # Big logs make an unfiltered QSO Labels table enormous -- show this
 # many most-recent rows and ask for a filter to see further back.
@@ -1045,8 +1051,14 @@ def admin_log_sync():
 
     full = request.form.get("full") == "1"
     since = until = None
+    mode = "incremental"
     if full:
         cursor = 0
+        mode = "full"
+    elif not state.get("caught_up") and state.get("mode") == "full":
+        # Carry on an unfinished "Re-sync everything" walk where it stopped.
+        cursor = int(state.get("next_logid") or 0)
+        mode = "full"
     elif state.get("caught_up"):
         # Normal incremental sync: only QSOs QRZ has added since last time.
         cursor = int(state.get("next_logid") or 0)
@@ -1069,6 +1081,7 @@ def admin_log_sync():
         # A window that wasn't saved with the cursor means the cursor came
         # from an old whole-logbook walk -- restart paging inside the window.
         cursor = int(state.get("next_logid") or 0) if state.get("since") == since else 0
+        mode = "window"
     started_at = time.monotonic()
     pages = fetched = added = backfilled = 0
     caught_up = False
@@ -1124,6 +1137,7 @@ def admin_log_sync():
                 "last_sync": time.time(),
                 "caught_up": False,
                 "since": since,
+                "mode": mode,
             })
         except S3Error as exc:
             error = s3_config_hint(exc)
@@ -1131,6 +1145,50 @@ def admin_log_sync():
         if len(qsos) < LOG_PAGE_SIZE:
             caught_up = True
             break
+
+    # Safety net for an incremental sync: QRZ's docs never promise log
+    # ids only increase, and a QSO with an id below the saved cursor
+    # would be skipped forever. So once caught up, also re-read the last
+    # few days by date (normally one small request; duplicates skipped).
+    recent_added = 0
+    if (caught_up and not error and mode == "incremental"
+            and time.monotonic() - started_at < QRZ_SYNC_TIME_BUDGET_SECONDS + 6):
+        recent_since = (date.today() - timedelta(days=QRZ_SYNC_RECENT_DAYS)).isoformat()
+        recent_until = (date.today() + timedelta(days=2)).isoformat()
+        recent_cursor = 0
+        try:
+            for _ in range(4):  # a few pages at most -- days, not the whole log
+                adif_text = fetch_log_page(QRZ_LOGBOOK_API_KEY, recent_cursor,
+                                           since=recent_since, until=recent_until)
+                qsos = parse_adif(adif_text) if adif_text else []
+                if not qsos:
+                    break
+                a_, b_ = photomap_store.import_my_qsos(qsos)
+                recent_added += a_
+                added += a_
+                backfilled += b_
+                fetched += len(qsos)
+                ids = [_parse_int(q.fields.get("app_qrzlog_logid"), default=0) for q in qsos]
+                if len(qsos) < LOG_PAGE_SIZE or not any(ids):
+                    break
+                recent_cursor = max(ids) + 1
+        except (QrzError, S3Error) as exc:
+            logger.warning("QRZ recent-days recheck failed: %s", exc)
+        except Exception as exc:
+            logger.warning("QRZ recent-days recheck failed: %s", exc)
+
+    # QRZ's own count, so the page can say whether the two actually match.
+    qrz_total = None
+    if not error and time.monotonic() - started_at < QRZ_SYNC_TIME_BUDGET_SECONDS + 10:
+        try:
+            qrz_total = status_total_qsos(fetch_status(QRZ_LOGBOOK_API_KEY))
+        except Exception as exc:
+            logger.warning("QRZ Logbook STATUS failed: %s", exc)
+    if qrz_total is not None:
+        try:
+            photomap_store.save_qrz_sync_state({"qrz_total": qrz_total, "qrz_total_at": time.time()})
+        except S3Error:
+            pass
 
     if caught_up:
         try:
@@ -1144,6 +1202,7 @@ def admin_log_sync():
                 "last_sync": time.time(),
                 "caught_up": not no_anchor,
                 "since": since if no_anchor else None,
+                "mode": None,
             })
         except S3Error as exc:
             error = error or s3_config_hint(exc)
@@ -1152,10 +1211,25 @@ def admin_log_sync():
     if backfilled:
         parts[0] += f", {backfilled} already-logged ones filled in"
     parts[0] += "."
+    if recent_added:
+        parts.append(f"({recent_added} of those turned up only in the recent-days recheck.)")
     if caught_up and not error:
         parts.append("Up to date with your QRZ Logbook.")
     elif not error:
-        parts.append("Stopped partway to stay under the server's time limit -- press Sync again to keep going.")
+        parts.append(
+            "Stopped partway to stay under the server's time limit -- press Sync again to keep going"
+            + (" (it picks up the full re-read where it left off)." if mode == "full" else ".")
+        )
+    if caught_up and not error and qrz_total is not None:
+        try:
+            here = photomap_store.count_my_qsos()
+        except S3Error:
+            here = None
+        if here is not None and here < qrz_total:
+            parts.append(
+                f"QRZ has {qrz_total} QSOs, this log has {here} -- press "
+                "\"Re-sync everything\" on the Your log page to pull in the rest."
+            )
     if error:
         parts.append(error)
     flash(" ".join(parts), "error" if error else "success")

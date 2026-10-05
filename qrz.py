@@ -355,3 +355,52 @@ def fetch_log_page(api_key: str, after_logid: int, page_size: int = LOG_PAGE_SIZ
         raise QrzLogbookError(f"QRZ Logbook fetch failed: {reason or resp.text[:200] or 'empty response'}")
     return adif_text
 
+
+def fetch_status(api_key: str, timeout: float = 10) -> dict:
+    """QRZ's own summary of the logbook (ACTION=STATUS): a dict of the
+    name=value pairs QRZ returns in DATA (total QSOs, confirmed, DXCC
+    count, start/end dates, ...), keys upper-cased. QRZ's docs don't
+    pin down the exact key names, so callers should use
+    status_total_qsos() to pull the QSO count out of it."""
+    resp = requests.post(
+        QRZ_LOGBOOK_API_URL,
+        data={"KEY": api_key, "ACTION": "STATUS"},
+        headers={"User-Agent": QRZ_LOGBOOK_USER_AGENT},
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    text = resp.text
+    result = ""
+    for pair in text.split("&"):
+        if pair.upper().startswith("RESULT="):
+            result = pair.split("=", 1)[1].strip().upper()
+            break
+    if result and result != "OK":
+        raise QrzLogbookError(f"QRZ Logbook STATUS failed: {text[:200]}")
+    # DATA's own pairs are "&"-joined too, so they arrive flattened in
+    # with RESULT/DATA -- just collect every name=value pair we can see.
+    data = {}
+    for pair in unquote_plus(text).replace("DATA=", "&").split("&"):
+        if "=" in pair:
+            k, v = pair.split("=", 1)
+            data[k.strip().upper()] = v.strip()
+    return data
+
+
+def status_total_qsos(status: dict) -> int | None:
+    """The total-QSOs-in-book number from fetch_status()'s dict, or None
+    if no key looks like one. Prefers exact well-known names, then any
+    key mentioning COUNT/TOTAL/QSO that isn't about confirmations,
+    DXCC, or states."""
+    for key in ("COUNT", "QSO_COUNT", "TOTAL_QSOS", "TOTAL", "QSOS"):
+        if status.get(key, "").isdigit():
+            return int(status[key])
+    for key, value in status.items():
+        if not value.isdigit():
+            continue
+        if any(bad in key for bad in ("CONFIRM", "DXCC", "STATE", "USA", "ID", "OWNER", "DATE")):
+            continue
+        if any(good in key for good in ("COUNT", "TOTAL", "QSO")):
+            return int(value)
+    return None
+
