@@ -28,6 +28,8 @@ from mailer import send_qsl_request_email
 from qrz import (
     LOG_PAGE_SIZE,
     QrzError,
+    fetch_all_logids,
+    fetch_by_logids,
     fetch_log_page,
     fetch_status,
     get_session_key,
@@ -1007,6 +1009,10 @@ def admin_log():
         flash(message, "success")
         return redirect(url_for("admin_log"))
 
+    return _render_log_page()
+
+
+def _render_log_page(**extra):
     try:
         qso_count = photomap_store.count_my_qsos()
         sync_state = photomap_store.qrz_sync_state()
@@ -1020,7 +1026,52 @@ def admin_log():
         sync_state=sync_state,
         logbook_configured=bool(QRZ_LOGBOOK_API_KEY),
         newest_qso_date=f"{newest[:4]}-{newest[4:6]}-{newest[6:]}" if newest else "",
+        **extra,
     )
+
+
+# How many missing QSOs the diagnostic will fetch and show in one go.
+MISSING_QSO_REPORT_CAP = 200
+
+
+@app.route("/admin/log/missing", methods=["POST"])
+@admin_required
+def admin_log_missing():
+    """Find exactly which QRZ Logbook entries this log doesn't account
+    for: list every QRZ log id (TYPE:LOGIDS, no QSO data), subtract the
+    ids already attached to rows (or recorded as QRZ-side duplicates),
+    fetch just the leftovers by id, and show what an import would do
+    with each. With `import=1`, also imports the ones that are new.
+    Read-only otherwise."""
+    if not QRZ_LOGBOOK_API_KEY:
+        flash("QRZ sync isn't set up yet (QRZ_LOGBOOK_API_KEY).", "error")
+        return redirect(url_for("admin_log"))
+    report = {"error": None}
+    try:
+        qrz_ids = fetch_all_logids(QRZ_LOGBOOK_API_KEY)
+        have = photomap_store.stored_qrz_logids()
+        missing_ids = sorted(i for i in set(qrz_ids) if str(i) not in have)
+        report.update(qrz_listed=len(set(qrz_ids)), accounted=len(have & {str(i) for i in qrz_ids}),
+                      missing_count=len(missing_ids))
+        shown = missing_ids[:MISSING_QSO_REPORT_CAP]
+        adif_text = fetch_by_logids(QRZ_LOGBOOK_API_KEY, shown) if shown else ""
+        qsos = parse_adif(adif_text) if adif_text else []
+        report["sent"] = adif_text.lower().count("<eor>") if adif_text else 0
+        report["rows"] = photomap_store.explain_qsos(qsos)
+        returned = {str(r["logid"]) for r in report["rows"]}
+        report["not_returned"] = [i for i in shown if str(i) not in returned]
+        if request.form.get("import") == "1" and qsos:
+            added, backfilled = photomap_store.import_my_qsos(qsos)
+            flash(f"Imported {added} of the missing QSOs.", "success" if added else "error")
+            return redirect(url_for("admin_log"))
+    except QrzError as exc:
+        report["error"] = str(exc)
+    except S3Error as exc:
+        report["error"] = s3_config_hint(exc)
+    except Exception as exc:
+        logger.warning("Missing-QSO check failed: %s", exc)
+        report["error"] = f"Couldn't complete the check ({exc.__class__.__name__}). Try again in a moment."
+    return _render_log_page(missing_report=report)
 
 
 @app.route("/admin/log/sync", methods=["POST"])

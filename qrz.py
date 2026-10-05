@@ -404,3 +404,41 @@ def status_total_qsos(status: dict) -> int | None:
             return int(value)
     return None
 
+
+def _logbook_fetch(api_key: str, option: str, timeout: float = 20) -> tuple[dict, str]:
+    """One raw FETCH with an arbitrary OPTION: (header fields, ADIF)."""
+    resp = requests.post(
+        QRZ_LOGBOOK_API_URL,
+        data={"KEY": api_key, "ACTION": "FETCH", "OPTION": option},
+        headers={"User-Agent": QRZ_LOGBOOK_USER_AGENT},
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    fields, adif_text = parse_logbook_response(resp.text)
+    result, reason = fields.get("RESULT", ""), fields.get("REASON", "")
+    if result == "AUTH" or "invalid api key" in reason.lower():
+        raise QrzLogbookError("QRZ rejected the Logbook API key.")
+    if result != "OK" and fields.get("COUNT") != "0":
+        raise QrzLogbookError(f"QRZ Logbook fetch failed: {reason or resp.text[:200]}")
+    return fields, adif_text
+
+
+def fetch_all_logids(api_key: str) -> list[int]:
+    """Every QSO's log id in the logbook, without the QSOs themselves
+    (OPTION=ALL,TYPE:LOGIDS -- the docs allow TYPE alongside ALL). Used to
+    find exactly which QRZ entries the app doesn't have."""
+    fields, _ = _logbook_fetch(api_key, "ALL,TYPE:LOGIDS")
+    raw = fields.get("LOGIDS", "")
+    return [int(x) for x in raw.replace("+", ",").replace(" ", ",").split(",") if x.strip().isdigit()]
+
+
+def fetch_by_logids(api_key: str, logids: list[int]) -> str:
+    """ADIF for specific QSOs by log id (OPTION=LOGIDS:a+b+c), fetched in
+    batches of 50."""
+    chunks = []
+    for i in range(0, len(logids), 50):
+        part = "+".join(str(x) for x in logids[i:i + 50])
+        _, adif_text = _logbook_fetch(api_key, f"LOGIDS:{part}")
+        chunks.append(adif_text)
+    return "\n".join(chunks)
+

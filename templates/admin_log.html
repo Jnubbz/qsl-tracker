@@ -66,6 +66,85 @@
     {% endif %}
   </section>
 
+  {% if logbook_configured %}
+  <section class="card">
+    <h1>Find missing QSOs</h1>
+    <p class="muted">
+      Asks QRZ for the list of every QSO id in your logbook (just the ids,
+      fast), compares it with what's here, and shows exactly which entries
+      aren't accounted for &mdash; and why. Nothing is changed unless you
+      choose to import.
+    </p>
+    <form method="post" action="{{ url_for('admin_log_missing') }}">
+      <button type="submit">Find missing QSOs</button>
+    </form>
+
+    {% if missing_report %}
+      {% set r = missing_report %}
+      {% if r.error %}
+        <p class="flag-missing">{{ r.error }}</p>
+      {% else %}
+        <p>
+          QRZ lists <strong>{{ r.qrz_listed }}</strong> QSO ids;
+          this log accounts for <strong>{{ r.accounted }}</strong>;
+          <strong>{{ r.missing_count }}</strong> not accounted for.
+          {% if sync_state.get('qrz_total') and sync_state.qrz_total != r.qrz_listed %}
+            <br><span class="muted">Note: QRZ's own total says {{ sync_state.qrz_total }}, but its id list
+            has {{ r.qrz_listed }} &mdash; the other {{ sync_state.qrz_total - r.qrz_listed }} aren't
+            fetchable through the API at all.</span>
+          {% endif %}
+        </p>
+        {% if r.rows %}
+          {% set new_rows = r.rows | selectattr('outcome', 'equalto', 'new') | list %}
+          <table class="contacts">
+            <thead>
+              <tr><th>QRZ id</th><th>Callsign</th><th>Date</th><th>Time</th><th>Band / Mode</th><th>Freq</th><th>What happens</th></tr>
+            </thead>
+            <tbody>
+              {% for row in r.rows %}
+                <tr>
+                  <td>{{ row.logid or '-' }}</td>
+                  <td>{{ row.callsign or '-' }}</td>
+                  <td>{{ row.qso_date or '-' }}</td>
+                  <td>{{ row.time_on or '-' }}</td>
+                  <td>{{ [row.band, row.mode] | select | join(' / ') or '-' }}</td>
+                  <td>{{ row.freq or '-' }}</td>
+                  <td>
+                    {% if row.outcome == 'new' %}
+                      <strong>Not here &mdash; would be added</strong>
+                    {% elif row.outcome == 'matches' %}
+                      Treated as the same contact as
+                      {{ row.row.callsign }} {{ row.row.qso_date }} {{ row.row.time_on or '(no time)' }}
+                      {{ row.row.freq }}{% if row.row.qrz_logid %} (QRZ id {{ row.row.qrz_logid }}){% endif %}
+                    {% else %}
+                      Skipped: {{ row.outcome }}
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% if new_rows %}
+            <form method="post" action="{{ url_for('admin_log_missing') }}" style="margin-top: 1rem;">
+              <input type="hidden" name="import" value="1">
+              <button type="submit">Import the {{ new_rows | length }} that aren't here</button>
+            </form>
+          {% endif %}
+        {% endif %}
+        {% if r.not_returned %}
+          <p class="flag-missing">
+            QRZ listed these ids but returned nothing when asked for them:
+            {{ r.not_returned | join(', ') }}.
+          </p>
+        {% endif %}
+        {% if r.missing_count > r.rows | length + r.not_returned | length %}
+          <p class="muted">Showing the first {{ r.rows | length }}; run it again after importing to see the rest.</p>
+        {% endif %}
+      {% endif %}
+    {% endif %}
+  </section>
+  {% endif %}
+
   <section class="card">
     <h1>Or upload an ADIF file</h1>
     <p class="muted">

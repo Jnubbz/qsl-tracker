@@ -389,11 +389,17 @@ def import_my_qsos(qsos: list, qrz_dupes: set | None = None) -> tuple[int, int]:
     return added, backfilled
 
 
+def _newest_first_key(q: dict) -> tuple:
+    """Sort key for "newest on top": date, then UTC time within the day
+    (HHMM / HHMMSS padded so "0930" < "093015" < "1400" compare right)."""
+    return (q.get("qso_date") or "", (q.get("time_on") or "").ljust(6, "0"))
+
+
 def find_my_qsos(callsign: str) -> list[dict]:
     data = _load()
     callsign = callsign.upper()
     rows = [q for q in data["my_qsos"] if q["callsign"] == callsign]
-    rows.sort(key=lambda q: q.get("qso_date") or "", reverse=True)
+    rows.sort(key=_newest_first_key, reverse=True)
     return rows
 
 
@@ -427,7 +433,7 @@ def list_all_my_qsos(dxcc_entity: str = "", callsign: str = "") -> list[dict]:
     if callsign:
         callsign = callsign.upper()
         rows = [q for q in rows if callsign in q["callsign"]]
-    return sorted(rows, key=lambda q: q.get("qso_date") or "", reverse=True)
+    return sorted(rows, key=_newest_first_key, reverse=True)
 
 
 def list_dxcc_entities() -> list[str]:
@@ -470,4 +476,46 @@ def newest_qso_date() -> str:
     log is empty -- where the first QRZ sync starts its date window."""
     dates = [q.get("qso_date") or "" for q in _load()["my_qsos"]]
     return max((d for d in dates if len(d) == 8 and d.isdigit()), default="")
+
+
+def stored_qrz_logids() -> set[str]:
+    """QRZ log ids attached to rows in the log, plus ones recorded as QRZ-
+    side duplicates -- i.e. every QRZ entry the app has accounted for."""
+    data = _load()
+    ids = {str(q["qrz_logid"]) for q in data["my_qsos"] if q.get("qrz_logid")}
+    ids |= {str(x) for x in (data.get("qrz_sync") or {}).get("qrz_dupe_logids") or []}
+    return ids
+
+
+def explain_qsos(qsos: list) -> list[dict]:
+    """For each parsed QSO, what import_my_qsos() *would* do with it,
+    without saving anything: "new" (would be added), "matches" (treated as
+    the same contact as an existing row -- included so a wrong merge is
+    visible), or "no callsign" (skipped)."""
+    data = _load()
+    existing: dict[tuple, list[dict]] = {}
+    for q in data["my_qsos"]:
+        existing.setdefault(
+            _dedupe_key(q["callsign"], q.get("qso_date"), q.get("band"), q.get("mode"), q.get("freq")), []
+        ).append(q)
+    out = []
+    for qso in qsos:
+        f = qso.fields
+        entry = {
+            "logid": f.get("app_qrzlog_logid", ""),
+            "callsign": qso.callsign,
+            "qso_date": f.get("qso_date", ""),
+            "time_on": f.get("time_on", ""),
+            "band": f.get("band", "").upper(),
+            "mode": f.get("mode", "").upper(),
+            "freq": f.get("freq", ""),
+        }
+        if not qso.callsign:
+            entry["outcome"], entry["row"] = "no callsign", None
+        else:
+            key = _dedupe_key(qso.callsign, f.get("qso_date", ""), f.get("band", ""), f.get("mode", ""), f.get("freq", ""))
+            row = _find_same_qso(existing.get(key, []), f.get("time_on", ""))
+            entry["outcome"], entry["row"] = ("matches", row) if row else ("new", None)
+        out.append(entry)
+    return out
 
