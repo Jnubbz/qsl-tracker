@@ -15,7 +15,7 @@ import logging
 import os
 import secrets
 import time
-from datetime import date
+from datetime import date, datetime, timedelta
 from functools import wraps
 
 from flask import Flask, Response, abort, flash, redirect, render_template, request, session, url_for
@@ -1004,14 +1004,16 @@ def admin_log():
     try:
         qso_count = photomap_store.count_my_qsos()
         sync_state = photomap_store.qrz_sync_state()
+        newest = photomap_store.newest_qso_date()
     except S3Error as exc:
         flash(s3_config_hint(exc), "error")
-        qso_count, sync_state = 0, {}
+        qso_count, sync_state, newest = 0, {}, ""
     return render_template(
         "admin_log.html",
         qso_count=qso_count,
         sync_state=sync_state,
         logbook_configured=bool(QRZ_LOGBOOK_API_KEY),
+        newest_qso_date=f"{newest[:4]}-{newest[4:6]}-{newest[6:]}" if newest else "",
     )
 
 
@@ -1042,7 +1044,31 @@ def admin_log_sync():
         return redirect(redirect_to)
 
     full = request.form.get("full") == "1"
-    cursor = 0 if full else int(state.get("next_logid") or 0)
+    since = until = None
+    if full:
+        cursor = 0
+    elif state.get("caught_up"):
+        # Normal incremental sync: only QSOs QRZ has added since last time.
+        cursor = int(state.get("next_logid") or 0)
+    else:
+        # First sync (or an unfinished one): if the log already holds an
+        # ADIF import, don't walk the whole QRZ logbook -- only ask for
+        # QSOs dated from the newest one already here (minus a day of
+        # overlap; duplicates are skipped anyway). Once this catches up,
+        # later syncs switch to plain AFTERLOGID paging above.
+        since = state.get("since")
+        if not since:
+            try:
+                newest = photomap_store.newest_qso_date()
+            except S3Error as exc:
+                flash(s3_config_hint(exc), "error")
+                return redirect(redirect_to)
+            if newest:
+                since = (datetime.strptime(newest, "%Y%m%d").date() - timedelta(days=1)).isoformat()
+        until = (date.today() + timedelta(days=2)).isoformat() if since else None
+        # A window that wasn't saved with the cursor means the cursor came
+        # from an old whole-logbook walk -- restart paging inside the window.
+        cursor = int(state.get("next_logid") or 0) if state.get("since") == since else 0
     started_at = time.monotonic()
     pages = fetched = added = backfilled = 0
     caught_up = False
@@ -1052,7 +1078,7 @@ def admin_log_sync():
         if pages and time.monotonic() - started_at > QRZ_SYNC_TIME_BUDGET_SECONDS:
             break
         try:
-            adif_text = fetch_log_page(QRZ_LOGBOOK_API_KEY, cursor)
+            adif_text = fetch_log_page(QRZ_LOGBOOK_API_KEY, cursor, since=since, until=until)
         except QrzError as exc:
             error = str(exc)
             break
@@ -1066,6 +1092,18 @@ def admin_log_sync():
         if not qsos:
             caught_up = True
             break
+
+        if since:
+            # Guard: if QRZ ignored the date window, most of this page will
+            # predate it -- stop instead of walking thousands of old QSOs.
+            floor = since.replace("-", "")
+            too_old = sum(1 for q in qsos if (q.fields.get("qso_date") or "99999999") < floor)
+            if too_old > len(qsos) // 2:
+                error = (
+                    f"QRZ didn't apply the date filter (got QSOs older than {since}), "
+                    "so the sync stopped rather than download your whole logbook."
+                )
+                break
 
         logids = [_parse_int(q.fields.get("app_qrzlog_logid"), default=0) for q in qsos]
         if not any(logids):
@@ -1085,6 +1123,7 @@ def admin_log_sync():
                 "next_logid": cursor,
                 "last_sync": time.time(),
                 "caught_up": False,
+                "since": since,
             })
         except S3Error as exc:
             error = s3_config_hint(exc)
@@ -1095,10 +1134,16 @@ def admin_log_sync():
 
     if caught_up:
         try:
+            # A date-window sync that found nothing new has no log id to
+            # resume from -- keep the window (cheap to re-ask) rather than
+            # marking caught up at cursor 0, which would mean a whole-
+            # logbook walk next time.
+            no_anchor = since is not None and cursor == 0
             photomap_store.save_qrz_sync_state({
                 "next_logid": cursor,
                 "last_sync": time.time(),
-                "caught_up": True,
+                "caught_up": not no_anchor,
+                "since": since if no_anchor else None,
             })
         except S3Error as exc:
             error = error or s3_config_hint(exc)

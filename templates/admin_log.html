@@ -19,10 +19,12 @@
     <h1>Sync from your QRZ Logbook</h1>
     {% if logbook_configured %}
       <p class="muted">
-        Pulls your QRZ Logbook in pages of 250. The first sync walks the whole
-        logbook; after that, each sync only fetches QSOs you've logged since.
-        A big first sync may stop partway to stay under the server's time
-        limit &mdash; just press Sync again and it carries on where it left off.
+        Pulls your QRZ Logbook in pages of 250. If your log already has QSOs
+        here (say, from an ADIF import), the first sync only asks QRZ for
+        QSOs from your newest one onward{% if newest_qso_date %} ({{ newest_qso_date }}){% endif %};
+        after that, each sync only fetches QSOs added to QRZ since last time.
+        If a sync stops partway to stay under the server's time limit, press
+        Sync again and it carries on where it left off.
       </p>
       <p class="muted">
         {% if sync_state.get('last_sync') %}

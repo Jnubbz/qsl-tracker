@@ -422,3 +422,10 @@ def save_qrz_sync_state(state: dict) -> None:
     data["qrz_sync"] = state
     _save(data)
 
+
+def newest_qso_date() -> str:
+    """Latest `qso_date` (ADIF YYYYMMDD) anywhere in the log, or "" if the
+    log is empty -- where the first QRZ sync starts its date window."""
+    dates = [q.get("qso_date") or "" for q in _load()["my_qsos"]]
+    return max((d for d in dates if len(d) == 8 and d.isdigit()), default="")
+

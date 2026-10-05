@@ -306,11 +306,26 @@ def parse_logbook_response(text: str) -> tuple[dict, str]:
     return fields, _decode_adif_payload(adif_text) if marker else ""
 
 
+def log_page_option(after_logid: int, page_size: int = LOG_PAGE_SIZE,
+                    since: str | None = None, until: str | None = None) -> str:
+    """The OPTION string fetch_log_page() sends."""
+    option = f"MAX:{page_size},AFTERLOGID:{after_logid}"
+    if since:
+        option += f",BETWEEN:{since}+{until or since}"
+    return option
+
+
 def fetch_log_page(api_key: str, after_logid: int, page_size: int = LOG_PAGE_SIZE,
-                   timeout: float = 12) -> str:
+                   timeout: float = 12, since: str | None = None,
+                   until: str | None = None) -> str:
     """One page of Josh's QRZ Logbook: up to `page_size` QSOs whose
     app_qrzlog_logid is >= `after_logid`, returned as decoded ADIF text
     (feed it to adif.parse_adif()). Returns "" when nothing is left.
+
+    `since`/`until` (YYYY-MM-DD) add a BETWEEN: date window on top of
+    the paging -- used for the first sync when the log already holds an
+    ADIF import, so only QSOs from the newest logged date onward are
+    fetched instead of the whole logbook.
 
     Raises QrzLogbookError for a rejected key or any other failure, with
     QRZ's own REASON text when it gives one."""
@@ -319,7 +334,7 @@ def fetch_log_page(api_key: str, after_logid: int, page_size: int = LOG_PAGE_SIZ
         data={
             "KEY": api_key,
             "ACTION": "FETCH",
-            "OPTION": f"MAX:{page_size},AFTERLOGID:{after_logid}",
+            "OPTION": log_page_option(after_logid, page_size, since, until),
         },
         headers={"User-Agent": QRZ_LOGBOOK_USER_AGENT},
         timeout=timeout,
