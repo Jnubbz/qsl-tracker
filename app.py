@@ -11,8 +11,6 @@ id) rather than in the cookie itself -- see db.py's auth_sessions table.
 """
 from __future__ import annotations
 
-import csv
-import io
 import logging
 import os
 import secrets
@@ -28,10 +26,10 @@ import photomap_store
 from adif import distinct_callsigns, parse_adif
 from mailer import send_qsl_request_email
 from qrz import (
+    LOG_PAGE_SIZE,
     QrzError,
-    format_mailing_label,
+    fetch_log_page,
     get_session_key,
-    lookup_callsign,
     lookup_callsign_raw,
     lookup_location,
 )
@@ -50,8 +48,8 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
 db.init_db()
 
-# Cap how many callsigns we'll look up from a single ADIF upload in one
-# request, so one big log file can't tie up the server or hammer QRZ.
+# Cap how many callsigns the Raw Address Ripper's ADIF bulk-add will
+# look up in one request, so one big log file can't tie up the server or hammer QRZ.
 MAX_LOOKUPS_PER_UPLOAD = 200
 
 # An ADIF upload does its QRZ lookups synchronously, inside the request
@@ -81,36 +79,39 @@ MAX_CONSECUTIVE_FAILURES = 5
 QSL_REQUEST_RATE_LIMIT = 3
 QSL_REQUEST_RATE_WINDOW_SECONDS = 600
 
-# Safety cap for admin_raw_address_adif_batch() below -- each distinct
-# callsign in an uploaded ADIF is its own live QRZ lookup, and a
-# mailing sheet only holds MAILING_LABEL_COUNT (30) anyway, so there's
-# no good reason to let an accidentally-huge log (a full year's log
-# instead of one contest session) trigger hundreds of QRZ requests in
-# one page load.
-RAW_ADIF_MAX_CALLSIGNS = 40
-
 # Gates the QSL Photo Map's upload/import pages -- just Josh, not the
 # QRZ-login system the rest of the app uses (that's per-visitor and
 # anonymous; this is one person's admin area). Unset in an environment
 # that hasn't configured it yet -- see admin_login() below.
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 
-# The QRZ Logbook API's own per-logbook access key (from Josh's QRZ
-# account: Logbook -> Settings -> API) -- a completely different secret
-# from the QRZ username/password the admin-login/dashboard flows use.
-# CURRENTLY UNUSED (2026-08-24): the QSO-label page briefly fetched
-# live from this API (see qrz.py's fetch_logged_qsos()/fetch_recent_qsos()/
-# fetch_raw(), all still present and untouched), but QRZ's own CALL:
-# filter turned out to be broken account-wide that day (confirmed
-# across multiple callsigns of different ages, with BETWEEN: still
-# working fine) -- see qsl-tracker-status.md in the project docs for
-# the full investigation. Reverted to the ADIF-imported log
-# (photomap_store.find_my_qsos()/get_my_qso()) as the QSO-label data
-# source in the meantime. This env var and qrz.py's Logbook API client
-# are left in place, ready to be wired back into admin_qso_label()
-# below whenever that's revisited -- nothing here needs to be rebuilt
-# from scratch, just re-plugged in.
+# The QRZ Logbook API's own per-logbook access key (QRZ.com -> Logbook
+# -> Settings -> API) -- a different secret from the QRZ username/
+# password the logins use. Drives the "Sync from QRZ" button on the log
+# page (admin_log() / admin_log_sync() below), which mirrors the whole
+# logbook into photomap_store by AFTERLOGID paging -- see qrz.py's
+# fetch_log_page() for why this replaced the old per-callsign CALL: fetch.
 QRZ_LOGBOOK_API_KEY = os.environ.get("QRZ_LOGBOOK_API_KEY", "")
+
+# A sync pages through the logbook synchronously, inside the request.
+# Gunicorn kills a worker after 30s by default, so stop starting new
+# pages after this many seconds (one page can still take up to the
+# request timeout in qrz.fetch_log_page()); the cursor is saved after
+# every page, so clicking Sync again just carries on from there.
+QRZ_SYNC_TIME_BUDGET_SECONDS = 12
+
+# Big logs make an unfiltered QSO Labels table enormous -- show this
+# many most-recent rows and ask for a filter to see further back.
+QSO_TABLE_ROW_CAP = 200
+
+
+@app.template_filter("utc_time")
+def utc_time(ts) -> str:
+    """Unix timestamp -> "2026-10-04 21:08 UTC" for the log/sync status lines."""
+    try:
+        return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(float(ts)))
+    except (TypeError, ValueError):
+        return ""
 
 
 @app.before_request
@@ -178,7 +179,9 @@ def s3_config_hint(exc: S3Error) -> str:
 
 @app.route("/")
 def index():
-    return render_template("index.html", logged_in=bool(qrz_key_or_none()))
+    if qrz_key_or_none():
+        return redirect(url_for("raw_address"))
+    return render_template("index.html")
 
 
 @app.route("/login", methods=["POST"])
@@ -189,7 +192,7 @@ def login():
     if key is None:
         return redirect(url_for("index"))
     flash("Logged in to QRZ.", "success")
-    return redirect(url_for("dashboard"))
+    return redirect(url_for("raw_address"))
 
 
 @app.route("/logout", methods=["POST"])
@@ -198,180 +201,31 @@ def logout():
     return redirect(url_for("index"))
 
 
+# Retired 2026-10-04: the old Dashboard (direct-only lookup + CSV export)
+# was folded into the Raw Address Ripper, which shows every address and
+# flags the ones not marked for a direct card. Old bookmarks still land
+# somewhere useful.
 @app.route("/dashboard")
-def dashboard():
-    if not qrz_key_or_none():
-        flash("Log in with your QRZ credentials first.", "error")
-        return redirect(url_for("index"))
-
-    direct_only = request.args.get("filter") == "direct"
-    contacts = db.get_contacts(session["session_id"], direct_only=direct_only)
-    auth = current_auth()
-    return render_template(
-        "dashboard.html",
-        contacts=contacts,
-        direct_only=direct_only,
-        qrz_username=auth["qrz_username"] if auth else None,
-    )
-
-
 @app.route("/export.csv")
-def export_csv():
-    if not qrz_key_or_none():
-        flash("Log in with your QRZ credentials first.", "error")
-        return redirect(url_for("index"))
-
-    # Mailing labels only make sense for contacts we actually kept an
-    # address for, regardless of which filter the dashboard table
-    # happens to be showing right now.
-    contacts = db.get_contacts(session["session_id"], direct_only=True)
-    if not contacts:
-        flash("No direct-QSL contacts with an address to export yet.", "error")
-        return redirect(url_for("dashboard"))
-
-    # One cell per contact holds a full, ready-to-paste mailing label
-    # (name, street, city/state/zip, country all on their own lines) --
-    # select the cell, paste, done. Callsign stays a separate column
-    # purely for reference/sorting; it's not part of the label itself.
-    buffer = io.StringIO()
-    writer = csv.writer(buffer)
-    writer.writerow(["Callsign", "Mailing Label"])
-    for c in contacts:
-        label = format_mailing_label(
-            c["name"], c["address"], c["city"], c["state"], c["zip_code"], c["country"]
-        )
-        writer.writerow([c["callsign"], label])
-
-    filename = f"qsl-direct-contacts-{date.today().isoformat()}.csv"
-    return Response(
-        buffer.getvalue(),
-        mimetype="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
-    )
-
-
-@app.route("/search", methods=["POST"])
-def search():
-    key = qrz_key_or_none()
-    if not key:
-        flash("Log in with your QRZ credentials first.", "error")
-        return redirect(url_for("index"))
-
-    callsign = request.form.get("callsign", "").strip()
-    if not callsign:
-        flash("Enter a callsign to look up.", "error")
-        return redirect(url_for("dashboard"))
-
-    try:
-        record = lookup_callsign(key, callsign)
-        db.upsert_contact(session["session_id"], record)
-        flash(f"Looked up {record.callsign}.", "success")
-    except QrzError as exc:
-        flash(f"QRZ lookup failed: {exc}", "error")
-    except Exception:
-        flash("Couldn't reach QRZ right now. Try again in a moment.", "error")
-
-    return redirect(url_for("dashboard"))
-
-
-@app.route("/upload", methods=["POST"])
-def upload():
-    key = qrz_key_or_none()
-    if not key:
-        flash("Log in with your QRZ credentials first.", "error")
-        return redirect(url_for("index"))
-
-    file = request.files.get("adif_file")
-    if not file or not file.filename:
-        flash("Choose an ADIF (.adi) file to upload.", "error")
-        return redirect(url_for("dashboard"))
-
-    try:
-        text = file.read().decode("utf-8", errors="ignore")
-    except Exception:
-        flash("Couldn't read that file.", "error")
-        return redirect(url_for("dashboard"))
-
-    qsos = parse_adif(text)
-    callsigns = distinct_callsigns(qsos)[:MAX_LOOKUPS_PER_UPLOAD]
-
-    if not callsigns:
-        flash("No callsigns found in that file.", "error")
-        return redirect(url_for("dashboard"))
-
-    looked_up, failed = 0, 0
-    consecutive_failures = 0
-    stopped_early = None
-    started_at = time.monotonic()
-
-    for i, callsign in enumerate(callsigns):
-        if time.monotonic() - started_at > UPLOAD_TIME_BUDGET_SECONDS:
-            stopped_early = "ran out of time for this request"
-            break
-        if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
-            stopped_early = "QRZ failed several times in a row"
-            break
-
-        try:
-            record = lookup_callsign(key, callsign)
-            db.upsert_contact(session["session_id"], record)
-            looked_up += 1
-            consecutive_failures = 0
-        except QrzError:
-            failed += 1
-            consecutive_failures += 1
-        except Exception:
-            failed += 1
-            consecutive_failures += 1
-
-        if i < len(callsigns) - 1:
-            time.sleep(LOOKUP_DELAY_SECONDS)
-
-    processed = looked_up + failed
-    message = f"Looked up {looked_up} of {len(callsigns)} callsigns from your log."
-    if failed:
-        message += f" ({failed} failed or had no QRZ record.)"
-    if stopped_early:
-        remaining = len(callsigns) - processed
-        message += (
-            f" Stopped after {processed} because {stopped_early}"
-            f" -- {remaining} callsign{'s' if remaining != 1 else ''} left."
-            " Upload the log again to pick up where this left off"
-            " (already-found contacts won't need re-fetching to show up,"
-            " but will be looked up again too)."
-        )
-    flash(message, "success" if looked_up else "error")
-    return redirect(url_for("dashboard"))
-
-
-@app.route("/clear", methods=["POST"])
-def clear():
-    db.clear_session(session["session_id"])
-    flash("Cleared your results.", "success")
-    return redirect(url_for("dashboard"))
+def dashboard():
+    return redirect(url_for("raw_address"))
 
 
 @app.route("/raw-address")
 def raw_address():
-    """Public Raw Address Ripper: any visitor, logged in with their own
-    QRZ XML subscriber account (same login as the regular Dashboard --
-    see qrz_key_or_none()/current_auth() and /login above), can look up
-    one callsign or bulk-upload an ADIF log (see raw_address_adif_batch()
-    below) and get whatever mailing address QRZ has on file, regardless
-    of accepts_direct -- the same idea as the admin-only Raw Address
-    Ripper (admin_raw_address() further down, Josh's own version), just
-    self-service for any ham instead of gated behind Josh's admin login.
+    """Raw Address Ripper -- the app's one mailing-address tool (since
+    2026-10-04, when it replaced the old Dashboard and both admin
+    address pages). Any visitor logged in with their own QRZ XML
+    subscriber account looks up one callsign or bulk-uploads an ADIF log
+    (raw_address_adif_batch() below) and gets whatever mailing address
+    QRZ has on file, with a warning when the station isn't marked as
+    accepting a direct card. Josh uses it too -- admin login already
+    requires a QRZ session.
 
     **Nothing here is ever written to SQLite or S3.** The batch lives
-    only in this visitor's own signed session cookie -- the same
-    minimal {callsign, name, position} shape every batch route in this
-    app already uses, re-fetched fresh from QRZ at print time, never an
-    address snapshot. This is actually *stricter* than the regular
-    Dashboard, whose `contacts` table does keep accepts_direct addresses
-    in SQLite for the length of the browser session (see db.py) --
-    deliberate, since this page shows addresses regardless of consent
-    and Josh specifically didn't want any of it landing in his own
-    storage."""
+    only in this visitor's own signed session cookie as minimal
+    {callsign, name, position} entries, re-fetched fresh from QRZ at
+    print time, never an address snapshot."""
     if not qrz_key_or_none():
         flash("Log in with your QRZ credentials first.", "error")
         return redirect(url_for("index"))
@@ -445,14 +299,17 @@ def raw_address_pdf():
 @app.route("/raw-address/batch/add", methods=["POST"])
 def raw_address_batch_add():
     """Add one address to the visitor's own raw-address batch (see
-    raw_address() above) at a chosen position -- same shape as
-    admin_raw_address_batch_add(), just public and scoped to this
-    visitor's own session key (`public_raw_batch`, kept entirely
-    separate from Josh's own `raw_address_batch` so the two can never
-    collide, including if Josh himself is browsing logged in as both
-    admin and a regular visitor in the same browser)."""
+    raw_address() above) at a chosen position, or the next free one if
+    no position is sent (the QSO Labels page's per-row "Address"
+    button). Stored under this visitor's own `public_raw_batch`."""
     callsign = request.form.get("callsign", "").strip().upper()
-    position = labels.clamp_mailing_position(_parse_int(request.form.get("position"), default=1))
+    if request.form.get("position"):
+        position = labels.clamp_mailing_position(_parse_int(request.form.get("position"), default=1))
+    else:
+        # No position sent (e.g. the "Address" button on QSO Labels) --
+        # take the next free one, same as the ADIF bulk-add does.
+        used = {b["position"] for b in session.get("public_raw_batch", [])}
+        position = _next_free_position(used, labels.MAILING_LABEL_COUNT) or 1
     redirect_to = _safe_next(url_for("raw_address", callsign=callsign, position=position))
 
     key = qrz_key_or_none()
@@ -516,8 +373,7 @@ def raw_address_batch_clear():
 @app.route("/raw-address/batch/pdf")
 def raw_address_batch_pdf():
     """One combined PDF with every address currently in this visitor's
-    own raw-address batch -- same idea as admin_raw_address_batch_pdf(),
-    re-fetching each entry fresh from QRZ at print time rather than
+    own raw-address batch, re-fetching each entry fresh from QRZ at print time rather than
     printing a stale snapshot."""
     batch = session.get("public_raw_batch", [])
     if not batch:
@@ -563,9 +419,8 @@ def raw_address_batch_pdf():
 def raw_address_adif_batch():
     """Public ADIF bulk-upload for Raw Address Ripper: any logged-in
     visitor uploads their own log and every distinct callsign in it
-    (capped at MAX_LOOKUPS_PER_UPLOAD, same cap the existing /upload
-    route already uses) gets a raw QRZ lookup, added straight to their
-    own batch. Paced and circuit-broken exactly like /upload above
+    (capped at MAX_LOOKUPS_PER_UPLOAD) gets a raw QRZ lookup, added
+    straight to their own batch. Paced and circuit-broken
     (LOOKUP_DELAY_SECONDS between requests so a big log doesn't hammer
     QRZ, UPLOAD_TIME_BUDGET_SECONDS wall-clock cutoff, and
     MAX_CONSECUTIVE_FAILURES to bail out of an apparent QRZ outage early)
@@ -732,7 +587,7 @@ def admin_login():
     earlier /login) does the password step show. Both steps land back
     on `next` when done, and a QRZ session already established via the
     main site's /login skips the QRZ step here entirely."""
-    next_url = request.values.get("next") or url_for("admin_photomap_upload")
+    next_url = request.values.get("next") or url_for("admin_qso_label")
 
     if request.method == "POST" and "qrz_username" in request.form:
         key = qrz_login_attempt(
@@ -768,535 +623,13 @@ def admin_logout():
     return redirect(url_for("index"))
 
 
+# Retired 2026-10-04: "Print Mailing Label" and the admin Raw Address
+# Ripper were both superseded by the public Raw Address Ripper (admin
+# login already requires a QRZ session, so it works as-is for Josh).
 @app.route("/admin/label")
-@admin_required
-def admin_label():
-    """Ad-hoc QSL mailing-label lookup. Looks up one callsign against QRZ
-    (reusing the same lookup_callsign() address-eligibility gating as the
-    main dashboard -- see qrz.py) and, if there's an address on file for
-    a direct card, shows an on-screen preview plus a link to a print-ready
-    PDF (see /admin/label/pdf and labels.py) sized for one cell of an
-    Avery 8160/5160/5260 1"x2-5/8" address-label sheet.
-
-    Also shows the address-label **batch** (see
-    admin_label_batch_add()/etc. below): several different addresses,
-    each at its own chosen position, so one sheet can print more than
-    one card's worth of address without wasting the other 29 positions
-    on a single lookup."""
-    callsign = request.args.get("callsign", "").strip().upper()
-    position = labels.clamp_mailing_position(_parse_int(request.args.get("position"), default=1))
-    record = None
-    error = None
-
-    if callsign:
-        key = qrz_key_or_none()
-        if not key:
-            return redirect(
-                url_for(
-                    "admin_login",
-                    next=url_for("admin_label", callsign=callsign, position=position),
-                )
-            )
-        try:
-            record = lookup_callsign(key, callsign)
-            if not record.accepts_direct:
-                error = (
-                    f"No mailing address on file for {record.callsign} that they've "
-                    "made available for a direct card -- either QRZ has no address, "
-                    "they've opted out of direct QSLs, or cards should route through "
-                    "a QSL manager instead."
-                )
-                record = None
-        except QrzError as exc:
-            error = f"QRZ lookup failed: {exc}"
-        except Exception:
-            error = "Couldn't reach QRZ right now. Try again in a moment."
-
-    batch = session.get("address_batch", [])
-    batch_used_positions = {b["position"] for b in batch}
-    return render_template(
-        "admin_label.html",
-        callsign=callsign,
-        position=position,
-        label_count=labels.MAILING_LABEL_COUNT,
-        record=record,
-        label_lines=labels.label_lines(record) if record else [],
-        error=error,
-        batch=batch,
-        batch_full=len(batch) >= labels.MAILING_LABEL_COUNT,
-        next_batch_position=_next_free_position(batch_used_positions, labels.MAILING_LABEL_COUNT),
-    )
-
-
-@app.route("/admin/label/pdf")
-@admin_required
-def admin_label_pdf():
-    callsign = request.args.get("callsign", "").strip().upper()
-    position = labels.clamp_mailing_position(_parse_int(request.args.get("position"), default=1))
-    if not callsign:
-        abort(400)
-
-    key = qrz_key_or_none()
-    if not key:
-        abort(401)
-
-    try:
-        record = lookup_callsign(key, callsign)
-    except QrzError:
-        abort(404)
-    except Exception:
-        abort(502)
-
-    if not record.accepts_direct:
-        abort(404)
-
-    pdf_bytes = labels.generate_mailing_label_pdf(record, position)
-    filename = f"qsl-label-{record.callsign}.pdf"
-    return Response(
-        pdf_bytes,
-        mimetype="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
-    )
-
-
-@app.route("/admin/label/batch/add", methods=["POST"])
-@admin_required
-def admin_label_batch_add():
-    """Add one address label to the running batch (see admin_label()
-    above) at a Josh-chosen position. Looks the callsign up fresh right
-    now (same gating as the single-label flow) so a bad add fails
-    immediately with a clear reason, rather than only surfacing at
-    print time. Only `callsign`/`position`/`name` (for display) are
-    kept in the session -- never the address itself -- so
-    admin_label_batch_pdf() below always prints whatever QRZ says right
-    now, not a stale snapshot from whenever this was added."""
-    callsign = request.form.get("callsign", "").strip().upper()
-    position = labels.clamp_mailing_position(_parse_int(request.form.get("position"), default=1))
-    redirect_to = _safe_next(url_for("admin_label", callsign=callsign, position=position))
-
-    if not callsign:
-        flash("Enter a callsign to add.", "error")
-        return redirect(redirect_to)
-
-    key = qrz_key_or_none()
-    if not key:
-        return redirect(url_for("admin_login", next=redirect_to))
-
-    try:
-        record = lookup_callsign(key, callsign)
-    except QrzError as exc:
-        flash(f"QRZ lookup failed: {exc}", "error")
-        return redirect(redirect_to)
-    except Exception:
-        flash("Couldn't reach QRZ right now. Try again in a moment.", "error")
-        return redirect(redirect_to)
-
-    if not record.accepts_direct:
-        flash(
-            f"No mailing address on file for {record.callsign} that they've made "
-            "available for a direct card -- not added.",
-            "error",
-        )
-        return redirect(redirect_to)
-
-    batch = session.get("address_batch", [])
-    if len(batch) >= labels.MAILING_LABEL_COUNT:
-        flash(
-            f"That sheet is full ({labels.MAILING_LABEL_COUNT} of "
-            f"{labels.MAILING_LABEL_COUNT} positions used) -- remove one, or "
-            "download/clear the batch first.",
-            "error",
-        )
-    elif any(b["position"] == position for b in batch):
-        flash(
-            f"Position {position} is already used in this batch -- pick a "
-            "different position, or remove that item first.",
-            "error",
-        )
-    else:
-        batch.append({"callsign": record.callsign, "name": record.name, "position": position})
-        session["address_batch"] = batch
-        flash(f"Added {record.callsign} at position {position}.", "success")
-
-    return redirect(redirect_to)
-
-
-@app.route("/admin/label/batch/remove", methods=["POST"])
-@admin_required
-def admin_label_batch_remove():
-    position = _parse_int(request.form.get("position"), default=0)
-    batch = session.get("address_batch", [])
-    session["address_batch"] = [b for b in batch if b["position"] != position]
-    return redirect(_safe_next(url_for("admin_label")))
-
-
-@app.route("/admin/label/batch/clear", methods=["POST"])
-@admin_required
-def admin_label_batch_clear():
-    session.pop("address_batch", None)
-    return redirect(_safe_next(url_for("admin_label")))
-
-
-@app.route("/admin/label/batch/pdf")
-@admin_required
-def admin_label_batch_pdf():
-    """One combined PDF with every address currently in the batch, each
-    at its own chosen position -- everything else on the sheet left
-    blank, same as the single-label PDF. Re-looks-up each callsign
-    fresh (the session only ever kept the callsign/position, never the
-    address) so this always prints current QRZ data."""
-    batch = session.get("address_batch", [])
-    if not batch:
-        abort(400)
-
-    key = qrz_key_or_none()
-    if not key:
-        abort(401)
-
-    items = []
-    dropped = []
-    for entry in batch:
-        try:
-            record = lookup_callsign(key, entry["callsign"])
-        except Exception:
-            dropped.append(entry["callsign"])
-            continue
-        if not record.accepts_direct:
-            dropped.append(entry["callsign"])
-            continue
-        items.append((record, entry["position"]))
-
-    if not items:
-        abort(404)
-
-    if dropped:
-        flash(
-            "Skipped in this print (no longer has a usable address on file): "
-            + ", ".join(dropped),
-            "error",
-        )
-
-    pdf_bytes = labels.generate_mailing_batch_pdf(items)
-    filename = f"qsl-labels-batch-{date.today().isoformat()}.pdf"
-    return Response(
-        pdf_bytes,
-        mimetype="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
-    )
-
-
 @app.route("/admin/raw-address")
-@admin_required
-def admin_raw_address():
-    """Raw Address Ripper: look up a callsign and show whatever mailing
-    address QRZ has on file, full stop -- no accepts_direct gating (see
-    qrz.lookup_callsign_raw()). Built for contests: an exchange (SASE
-    requested, no QSL manager, "direct" never actually written anywhere
-    on the page) still means a card needs to go out, and QRZ often has a
-    perfectly good address on file even when the operator never ticked
-    mqsl or mentioned direct at all. Same Avery 8160 label format and
-    PDF renderer as the regular mailing label (see admin_label() above),
-    and its own separate batch (`raw_address_batch`) so a contest's
-    worth of raw lookups doesn't collide with the regular
-    already-vetted-as-direct batch on /admin/label."""
-    callsign = request.args.get("callsign", "").strip().upper()
-    position = labels.clamp_mailing_position(_parse_int(request.args.get("position"), default=1))
-    record = None
-    error = None
-
-    if callsign:
-        key = qrz_key_or_none()
-        if not key:
-            return redirect(
-                url_for(
-                    "admin_login",
-                    next=url_for("admin_raw_address", callsign=callsign, position=position),
-                )
-            )
-        try:
-            record = lookup_callsign_raw(key, callsign)
-            if not record.address:
-                error = f"QRZ has no address on file at all for {record.callsign}."
-                record = None
-        except QrzError as exc:
-            error = f"QRZ lookup failed: {exc}"
-        except Exception:
-            error = "Couldn't reach QRZ right now. Try again in a moment."
-
-    batch = session.get("raw_address_batch", [])
-    batch_used_positions = {b["position"] for b in batch}
-    return render_template(
-        "admin_raw_address.html",
-        callsign=callsign,
-        position=position,
-        label_count=labels.MAILING_LABEL_COUNT,
-        record=record,
-        label_lines=labels.label_lines(record) if record else [],
-        error=error,
-        batch=batch,
-        batch_full=len(batch) >= labels.MAILING_LABEL_COUNT,
-        next_batch_position=_next_free_position(batch_used_positions, labels.MAILING_LABEL_COUNT),
-        raw_adif_max_callsigns=RAW_ADIF_MAX_CALLSIGNS,
-    )
-
-
-@app.route("/admin/raw-address/pdf")
-@admin_required
-def admin_raw_address_pdf():
-    callsign = request.args.get("callsign", "").strip().upper()
-    position = labels.clamp_mailing_position(_parse_int(request.args.get("position"), default=1))
-    if not callsign:
-        abort(400)
-
-    key = qrz_key_or_none()
-    if not key:
-        abort(401)
-
-    try:
-        record = lookup_callsign_raw(key, callsign)
-    except QrzError:
-        abort(404)
-    except Exception:
-        abort(502)
-
-    if not record.address:
-        abort(404)
-
-    pdf_bytes = labels.generate_mailing_label_pdf(record, position)
-    filename = f"qsl-raw-address-{record.callsign}.pdf"
-    return Response(
-        pdf_bytes,
-        mimetype="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
-    )
-
-
-@app.route("/admin/raw-address/batch/add", methods=["POST"])
-@admin_required
-def admin_raw_address_batch_add():
-    """Add one address to the raw-address batch (see admin_raw_address()
-    above) at a Josh-chosen position -- same shape as
-    admin_label_batch_add(), just backed by lookup_callsign_raw() so a
-    missing "direct" flag never blocks the add."""
-    callsign = request.form.get("callsign", "").strip().upper()
-    position = labels.clamp_mailing_position(_parse_int(request.form.get("position"), default=1))
-    redirect_to = _safe_next(url_for("admin_raw_address", callsign=callsign, position=position))
-
-    if not callsign:
-        flash("Enter a callsign to add.", "error")
-        return redirect(redirect_to)
-
-    key = qrz_key_or_none()
-    if not key:
-        return redirect(url_for("admin_login", next=redirect_to))
-
-    try:
-        record = lookup_callsign_raw(key, callsign)
-    except QrzError as exc:
-        flash(f"QRZ lookup failed: {exc}", "error")
-        return redirect(redirect_to)
-    except Exception:
-        flash("Couldn't reach QRZ right now. Try again in a moment.", "error")
-        return redirect(redirect_to)
-
-    if not record.address:
-        flash(f"QRZ has no address on file at all for {record.callsign} -- not added.", "error")
-        return redirect(redirect_to)
-
-    batch = session.get("raw_address_batch", [])
-    if len(batch) >= labels.MAILING_LABEL_COUNT:
-        flash(
-            f"That sheet is full ({labels.MAILING_LABEL_COUNT} of "
-            f"{labels.MAILING_LABEL_COUNT} positions used) -- remove one, or "
-            "download/clear the batch first.",
-            "error",
-        )
-    elif any(b["position"] == position for b in batch):
-        flash(
-            f"Position {position} is already used in this batch -- pick a "
-            "different position, or remove that item first.",
-            "error",
-        )
-    else:
-        batch.append({"callsign": record.callsign, "name": record.name, "position": position})
-        session["raw_address_batch"] = batch
-        flash(f"Added {record.callsign} at position {position}.", "success")
-
-    return redirect(redirect_to)
-
-
-@app.route("/admin/raw-address/batch/remove", methods=["POST"])
-@admin_required
-def admin_raw_address_batch_remove():
-    position = _parse_int(request.form.get("position"), default=0)
-    batch = session.get("raw_address_batch", [])
-    session["raw_address_batch"] = [b for b in batch if b["position"] != position]
-    return redirect(_safe_next(url_for("admin_raw_address")))
-
-
-@app.route("/admin/raw-address/batch/clear", methods=["POST"])
-@admin_required
-def admin_raw_address_batch_clear():
-    session.pop("raw_address_batch", None)
-    return redirect(_safe_next(url_for("admin_raw_address")))
-
-
-@app.route("/admin/raw-address/batch/pdf")
-@admin_required
-def admin_raw_address_batch_pdf():
-    """One combined PDF with every address currently in the raw-address
-    batch, each at its own chosen position -- same idea as
-    admin_label_batch_pdf(), backed by lookup_callsign_raw() so a
-    station with no "direct" flag set doesn't silently get dropped from
-    the batch the way it would on the regular mailing-label batch."""
-    batch = session.get("raw_address_batch", [])
-    if not batch:
-        abort(400)
-
-    key = qrz_key_or_none()
-    if not key:
-        abort(401)
-
-    items = []
-    dropped = []
-    for entry in batch:
-        try:
-            record = lookup_callsign_raw(key, entry["callsign"])
-        except Exception:
-            dropped.append(entry["callsign"])
-            continue
-        if not record.address:
-            dropped.append(entry["callsign"])
-            continue
-        items.append((record, entry["position"]))
-
-    if not items:
-        abort(404)
-
-    if dropped:
-        flash(
-            "Skipped in this print (QRZ has no address on file at all): "
-            + ", ".join(dropped),
-            "error",
-        )
-
-    pdf_bytes = labels.generate_mailing_batch_pdf(items)
-    filename = f"qsl-raw-addresses-batch-{date.today().isoformat()}.pdf"
-    return Response(
-        pdf_bytes,
-        mimetype="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
-    )
-
-
-@app.route("/admin/raw-address/adif-batch", methods=["POST"])
-@admin_required
-def admin_raw_address_adif_batch():
-    """Bulk-add to the raw-address batch straight from an uploaded ADIF
-    log -- built for a contest session's worth of callsigns (e.g. the
-    Route 66 QSO Party) instead of typing each one into the single
-    lookup form by hand, one at a time.
-
-    Deliberately **stays out of S3 entirely**: unlike the QSL Photo
-    Map's ADIF import (photomap_store.import_my_qsos(), which durably
-    stores every QSO it's ever given, forever, in the bucket), this
-    route reads the uploaded file, extracts distinct callsigns with
-    adif.py's existing parse_adif()/distinct_callsigns(), does one live
-    QRZ lookup per callsign, and then forgets the upload completely --
-    nothing about it (not the file, not the parsed QSOs, not the
-    addresses) is ever written anywhere. Only the same minimal
-    {callsign, name, position} entries every other batch route here
-    already stores land in the session.
-
-    Capped at RAW_ADIF_MAX_CALLSIGNS distinct callsigns per upload (see
-    that constant's comment) and at whatever room is actually left on
-    the sheet -- this is deliberately best-effort, not all-or-nothing
-    like the QSO-label checkbox batch add: a contest log realistically
-    mixes hits and misses (no address on file, a bad/unheard callsign,
-    a duplicate already in the batch), and Josh should still get
-    everything that *did* work rather than have one bad callsign block
-    the other 21. The flash message reports each outcome bucket by
-    name so nothing silently vanishes."""
-    file_storage = request.files.get("adif_file")
-    redirect_to = _safe_next(url_for("admin_raw_address"))
-
-    if not file_storage or not file_storage.filename:
-        flash("Choose an ADIF (.adi/.adif) file to upload.", "error")
-        return redirect(redirect_to)
-
-    try:
-        text = file_storage.read().decode("utf-8", errors="replace")
-    except Exception:
-        flash("Couldn't read that file -- is it a text ADIF export?", "error")
-        return redirect(redirect_to)
-
-    callsigns = distinct_callsigns(parse_adif(text))
-
-    if not callsigns:
-        flash(f"No callsigns found in {file_storage.filename} -- is it a valid ADIF log?", "error")
-        return redirect(redirect_to)
-
-    if len(callsigns) > RAW_ADIF_MAX_CALLSIGNS:
-        flash(
-            f"{file_storage.filename} has {len(callsigns)} distinct callsigns -- "
-            f"more than this tool processes in one upload ({RAW_ADIF_MAX_CALLSIGNS} "
-            "max, since each one is its own live QRZ lookup and a mailing sheet "
-            "only holds 30 anyway). Export or filter to just the session/contest "
-            "you need labels for and upload that instead.",
-            "error",
-        )
-        return redirect(redirect_to)
-
-    key = qrz_key_or_none()
-    if not key:
-        return redirect(url_for("admin_login", next=redirect_to))
-
-    batch = session.get("raw_address_batch", [])
-    used_positions = {b["position"] for b in batch}
-    already_batched = {b["callsign"] for b in batch}
-
-    added, no_address, lookup_failed, duplicates, sheet_full = [], [], [], [], []
-
-    for callsign in callsigns:
-        if callsign in already_batched:
-            duplicates.append(callsign)
-            continue
-        position = _next_free_position(used_positions, labels.MAILING_LABEL_COUNT)
-        if position is None:
-            sheet_full.append(callsign)
-            continue
-        try:
-            record = lookup_callsign_raw(key, callsign)
-        except Exception:
-            lookup_failed.append(callsign)
-            continue
-        if not record.address:
-            no_address.append(callsign)
-            continue
-        batch.append({"callsign": record.callsign, "name": record.name, "position": position})
-        used_positions.add(position)
-        already_batched.add(record.callsign)
-        added.append(record.callsign)
-
-    session["raw_address_batch"] = batch
-
-    summary = [f"{file_storage.filename}: {len(callsigns)} distinct callsign(s) found."]
-    if added:
-        summary.append(f"Added {len(added)} to the batch: {', '.join(added)}.")
-    if no_address:
-        summary.append(f"No address on file for {len(no_address)}: {', '.join(no_address)}.")
-    if lookup_failed:
-        summary.append(f"QRZ lookup failed for {len(lookup_failed)}: {', '.join(lookup_failed)}.")
-    if duplicates:
-        summary.append(f"Already in the batch, skipped: {', '.join(duplicates)}.")
-    if sheet_full:
-        summary.append(
-            f"Sheet is full ({labels.MAILING_LABEL_COUNT} of {labels.MAILING_LABEL_COUNT}), "
-            f"not added: {', '.join(sheet_full)}."
-        )
-
-    flash(" ".join(summary), "success" if added else "error")
-    return redirect(redirect_to)
+def admin_label_retired():
+    return redirect(url_for("raw_address"))
 
 
 def _parse_int(raw: str | None, default: int) -> int:
@@ -1337,67 +670,71 @@ def _safe_next(fallback: str) -> str:
 @app.route("/admin/qso-label")
 @admin_required
 def admin_qso_label():
-    """Print a label of one of Josh's own logged QSOs (callsign,
-    date/time in UTC, band/mode/freq, RST sent/received) -- meant to be
-    stuck onto a blank 2"x4" spot on the physical QSL card instead of
-    hand-written. Reads from the imported ADIF log
-    (photomap_store.find_my_qsos()/get_my_qso() -- upload/refresh it at
-    /admin/photomap/import-adif), not a live QRZ fetch -- see the
-    QRZ_LOGBOOK_API_KEY comment near the top of this file for why.
+    """QSO Labels -- the one page for printing labels of Josh's own
+    logged QSOs (callsign, UTC date/time, and a details grid of
+    band/mode/freq/grid/RST, on an Avery 5163/8163 2"x4" sheet).
 
-    A callsign can have several logged QSOs (repeat contacts, different
-    bands/dates), so this is a two-step page: first pick a callsign and
-    see the matches, then pick the specific QSO (`qso_key`, really the
-    row's `id` as a string) to preview and print.
+    Merged 2026-10-04 from the old single-callsign "Print QSO Label"
+    page and the "Browse by DXCC Entity" list: one table of the log,
+    filterable by callsign (substring) and/or DXCC entity, with
+    checkbox multi-select into the batch, a per-row "Preview" (which
+    also allows a hand-picked sheet position), and a per-row "Address"
+    button that drops that station into the Raw Address Ripper batch.
 
-    Also shows the QSO-label **batch** (see
-    admin_qso_label_batch_add()/etc. below): several different QSOs,
-    each at its own chosen position, so one sheet can print more than
-    one card's worth of labels without wasting the other 9 positions on
-    a single QSO."""
+    The log itself comes from photomap_store -- filled by "Sync from
+    QRZ" or an ADIF upload on the log page (admin_log())."""
     callsign = request.args.get("callsign", "").strip().upper()
+    entity = request.args.get("entity", "")
     qso_key = request.args.get("qso_key", "")
     position = labels.clamp_qso_position(_parse_int(request.args.get("position"), default=1))
 
-    matches = []
     qso = None
-    error = None
-
-    if callsign:
-        try:
-            matches = photomap_store.find_my_qsos(callsign)
-        except S3Error as exc:
-            error = s3_config_hint(exc)
-            matches = []
-        if not error and not matches:
-            error = (
-                f"No logged QSO with {callsign} found in your imported ADIF log. "
-                "If you've logged this contact since your last import, upload an "
-                "updated ADIF export first (see the link below the search box)."
-            )
-        elif not error and qso_key:
-            qso = next((m for m in matches if str(m["id"]) == qso_key), None)
+    rows = []
+    entities = []
+    total = 0
+    sync_state = {}
+    try:
+        entities = photomap_store.list_dxcc_entities()
+        rows = photomap_store.list_all_my_qsos(dxcc_entity=entity, callsign=callsign)
+        total = photomap_store.count_my_qsos()
+        sync_state = photomap_store.qrz_sync_state()
+        if qso_key:
+            qso = photomap_store.get_my_qso(_parse_int(qso_key, default=0))
             if qso is None:
-                error = "That logged QSO couldn't be found -- try picking it again."
-            else:
-                # A specific QSO was picked -- show its preview, not the
-                # full match table again.
-                matches = []
+                flash("That logged QSO couldn't be found -- pick it again.", "error")
+    except S3Error as exc:
+        flash(s3_config_hint(exc), "error")
+
+    shown_rows = rows[:QSO_TABLE_ROW_CAP]
+    self_url = url_for(
+        "admin_qso_label", callsign=callsign or None, entity=entity or None
+    )
 
     batch = session.get("qso_batch", [])
     batch_used_positions = {b["position"] for b in batch}
+    address_batch = session.get("public_raw_batch", [])
     return render_template(
         "admin_qso_label.html",
         callsign=callsign,
+        entity=entity,
+        entities=entities,
+        rows=shown_rows,
+        row_count=len(rows),
+        row_cap=QSO_TABLE_ROW_CAP,
+        total_qsos=total,
+        sync_state=sync_state,
+        logbook_configured=bool(QRZ_LOGBOOK_API_KEY),
+        self_url=self_url,
         position=position,
         label_count=labels.QSO_LABEL_COUNT,
-        matches=matches,
         qso=qso,
         qso_fields=labels.qso_label_fields(qso) if qso else None,
-        error=error,
         batch=batch,
         batch_full=len(batch) >= labels.QSO_LABEL_COUNT,
         next_batch_position=_next_free_position(batch_used_positions, labels.QSO_LABEL_COUNT),
+        address_batch_count=len(address_batch),
+        mailing_label_count=labels.MAILING_LABEL_COUNT,
+        has_qrz_session=bool(qrz_key_or_none()),
     )
 
 
@@ -1620,102 +957,164 @@ def admin_qso_label_batch_pdf():
     )
 
 
+# Merged into admin_qso_label() above on 2026-10-04 -- keep the old
+# browse-by-DXCC URL (filters included) working.
 @app.route("/admin/qsos")
 @admin_required
 def admin_qsos():
-    """Browse every logged QSO at once, optionally filtered by DXCC
-    entity (and/or a callsign substring) -- the entry point for
-    batching several QSO labels or several mailing addresses by
-    country instead of searching one callsign at a time. Each row's
-    "Add to QSO batch"/"Add address" forms post straight to the
-    existing admin_qso_label_batch_add()/admin_label_batch_add() routes
-    (a hidden `next` field brings Josh back here, filters intact,
-    instead of over to the single-lookup pages -- see _safe_next()).
-
-    A QSO's `dxcc_entity` comes from whatever import_my_qsos() captured
-    at ADIF-import time (the log's own COUNTRY field if present, else a
-    best-effort guess from the callsign prefix -- see dxcc.py); a QSO
-    imported before that capture existed, or whose callsign didn't
-    match anything in the prefix table, just won't have one and won't
-    show up under any specific entity filter (still shows up with no
-    filter, or under a callsign search)."""
-    selected_entity = request.args.get("entity", "")
-    callsign_filter = request.args.get("callsign", "").strip().upper()
-
-    try:
-        entities = photomap_store.list_dxcc_entities()
-        rows = photomap_store.list_all_my_qsos(
-            dxcc_entity=selected_entity, callsign=callsign_filter
-        )
-    except S3Error as exc:
-        flash(s3_config_hint(exc), "error")
-        entities = []
-        rows = []
-
-    self_url = url_for(
-        "admin_qsos", entity=selected_entity or None, callsign=callsign_filter or None
-    )
-
-    qso_batch = session.get("qso_batch", [])
-    qso_used = {b["position"] for b in qso_batch}
-    address_batch = session.get("address_batch", [])
-    address_used = {b["position"] for b in address_batch}
-
-    return render_template(
-        "admin_qsos.html",
-        entities=entities,
-        selected_entity=selected_entity,
-        callsign_filter=callsign_filter,
-        rows=rows,
-        self_url=self_url,
-        qso_label_count=labels.QSO_LABEL_COUNT,
-        mailing_label_count=labels.MAILING_LABEL_COUNT,
-        qso_batch=qso_batch,
-        qso_batch_full=len(qso_batch) >= labels.QSO_LABEL_COUNT,
-        next_qso_position=_next_free_position(qso_used, labels.QSO_LABEL_COUNT),
-        address_batch=address_batch,
-        address_batch_full=len(address_batch) >= labels.MAILING_LABEL_COUNT,
-        next_address_position=_next_free_position(address_used, labels.MAILING_LABEL_COUNT),
-    )
+    return redirect(url_for(
+        "admin_qso_label",
+        entity=request.args.get("entity") or None,
+        callsign=request.args.get("callsign") or None,
+    ))
 
 
+@app.route("/admin/log", methods=["GET", "POST"])
 @app.route("/admin/photomap/import-adif", methods=["GET", "POST"])
 @admin_required
-def admin_import_adif():
-    """Upload Josh's own ADIF log so the photo-upload form below can
-    offer to auto-fill QSO details for a callsign. Separate from the
-    main dashboard's /upload -- that one drives QRZ lookups per visitor
-    and doesn't keep QSO details; this one keeps the QSO details
-    (date/band/mode/freq/RST) and never touches QRZ."""
+def admin_log():
+    """Josh's own log, as the app sees it -- the data behind QSO Labels
+    and the card-upload page's QSO auto-fill. Two ways to fill it, both
+    landing in the same photomap_store rows (deduplicated, so using both
+    is safe): "Sync from QRZ" (admin_log_sync() below) or uploading an
+    ADIF export here (POST)."""
     if request.method == "POST":
         file = request.files.get("adif_file")
         if not file or not file.filename:
             flash("Choose an ADIF (.adi) file to upload.", "error")
-            return redirect(url_for("admin_import_adif"))
+            return redirect(url_for("admin_log"))
         try:
             text = file.read().decode("utf-8", errors="ignore")
         except Exception:
             flash("Couldn't read that file.", "error")
-            return redirect(url_for("admin_import_adif"))
+            return redirect(url_for("admin_log"))
 
         qsos = parse_adif(text)
         try:
             added, backfilled = photomap_store.import_my_qsos(qsos)
         except S3Error as exc:
             flash(s3_config_hint(exc), "error")
-            return redirect(url_for("admin_import_adif"))
+            return redirect(url_for("admin_log"))
         message = f"Imported {added} new QSO record(s) ({len(qsos)} found in the file)."
         if backfilled:
-            message += f" Backfilled a UTC time, grid square, and/or DXCC entity onto {backfilled} already-imported record(s)."
+            message += f" Filled in missing details on {backfilled} already-imported record(s)."
         flash(message, "success")
-        return redirect(url_for("admin_import_adif"))
+        return redirect(url_for("admin_log"))
 
     try:
         qso_count = photomap_store.count_my_qsos()
+        sync_state = photomap_store.qrz_sync_state()
     except S3Error as exc:
         flash(s3_config_hint(exc), "error")
-        qso_count = 0
-    return render_template("admin_import_adif.html", qso_count=qso_count)
+        qso_count, sync_state = 0, {}
+    return render_template(
+        "admin_log.html",
+        qso_count=qso_count,
+        sync_state=sync_state,
+        logbook_configured=bool(QRZ_LOGBOOK_API_KEY),
+    )
+
+
+@app.route("/admin/log/sync", methods=["POST"])
+@admin_required
+def admin_log_sync():
+    """Pull Josh's QRZ Logbook into the app's log store, 250 QSOs per
+    request to QRZ, resuming from the saved AFTERLOGID cursor (so the
+    first sync walks the whole logbook and later ones only fetch new
+    QSOs). `full=1` restarts from the beginning -- useful once, to tag
+    already-imported ADIF rows with their QRZ log ids, or if something
+    looks off. Stops starting new pages after QRZ_SYNC_TIME_BUDGET_SECONDS
+    and says so; the cursor is saved after every page, so pressing Sync
+    again carries on exactly where it stopped."""
+    redirect_to = _safe_next(url_for("admin_log"))
+    if not QRZ_LOGBOOK_API_KEY:
+        flash(
+            "QRZ sync isn't set up yet: add QRZ_LOGBOOK_API_KEY in Render's "
+            "Environment settings (QRZ.com -> Logbook -> Settings -> API key).",
+            "error",
+        )
+        return redirect(redirect_to)
+
+    try:
+        state = photomap_store.qrz_sync_state()
+    except S3Error as exc:
+        flash(s3_config_hint(exc), "error")
+        return redirect(redirect_to)
+
+    full = request.form.get("full") == "1"
+    cursor = 0 if full else int(state.get("next_logid") or 0)
+    started_at = time.monotonic()
+    pages = fetched = added = backfilled = 0
+    caught_up = False
+    error = None
+
+    while True:
+        if pages and time.monotonic() - started_at > QRZ_SYNC_TIME_BUDGET_SECONDS:
+            break
+        try:
+            adif_text = fetch_log_page(QRZ_LOGBOOK_API_KEY, cursor)
+        except QrzError as exc:
+            error = str(exc)
+            break
+        except Exception as exc:  # network trouble, timeouts, non-200s
+            logger.warning("QRZ Logbook sync request failed: %s", exc)
+            error = "Couldn't reach QRZ's Logbook API right now. Try again in a moment."
+            break
+
+        qsos = parse_adif(adif_text) if adif_text else []
+        pages += 1
+        if not qsos:
+            caught_up = True
+            break
+
+        logids = [_parse_int(q.fields.get("app_qrzlog_logid"), default=0) for q in qsos]
+        if not any(logids):
+            error = "QRZ returned QSOs without log ids, so the sync can't page past them."
+            break
+        try:
+            a, b = photomap_store.import_my_qsos(qsos)
+        except S3Error as exc:
+            error = s3_config_hint(exc)
+            break
+        added += a
+        backfilled += b
+        fetched += len(qsos)
+        cursor = max(logids) + 1
+        try:
+            photomap_store.save_qrz_sync_state({
+                "next_logid": cursor,
+                "last_sync": time.time(),
+                "caught_up": False,
+            })
+        except S3Error as exc:
+            error = s3_config_hint(exc)
+            break
+        if len(qsos) < LOG_PAGE_SIZE:
+            caught_up = True
+            break
+
+    if caught_up:
+        try:
+            photomap_store.save_qrz_sync_state({
+                "next_logid": cursor,
+                "last_sync": time.time(),
+                "caught_up": True,
+            })
+        except S3Error as exc:
+            error = error or s3_config_hint(exc)
+
+    parts = [f"Fetched {fetched} QSO(s) from QRZ: {added} new"]
+    if backfilled:
+        parts[0] += f", {backfilled} already-logged ones filled in"
+    parts[0] += "."
+    if caught_up and not error:
+        parts.append("Up to date with your QRZ Logbook.")
+    elif not error:
+        parts.append("Stopped partway to stay under the server's time limit -- press Sync again to keep going.")
+    if error:
+        parts.append(error)
+    flash(" ".join(parts), "error" if error else "success")
+    return redirect(redirect_to)
 
 
 @app.route("/admin/photomap/api/qsos")

@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Your Log{% endblock %}
+{% block content %}
+  <section class="card">
+    <div class="dashboard-top">
+      <h1>Your log</h1>
+      <form method="post" action="{{ url_for('admin_logout') }}">
+        <button type="submit" class="link-button">Log out (admin)</button>
+      </form>
+    </div>
+    <p class="muted">
+      The copy of your log behind <a href="{{ url_for('admin_qso_label') }}">QSO Labels</a>
+      and the card-upload page's QSO auto-fill.
+      {{ qso_count }} QSO record{{ 's' if qso_count != 1 else '' }} on file right now.
+    </p>
+  </section>
+
+  <section class="card">
+    <h1>Sync from your QRZ Logbook</h1>
+    {% if logbook_configured %}
+      <p class="muted">
+        Pulls your QRZ Logbook in pages of 250. The first sync walks the whole
+        logbook; after that, each sync only fetches QSOs you've logged since.
+        A big first sync may stop partway to stay under the server's time
+        limit &mdash; just press Sync again and it carries on where it left off.
+      </p>
+      <p class="muted">
+        {% if sync_state.get('last_sync') %}
+          Last synced {{ sync_state.last_sync | utc_time }}
+          {%- if sync_state.get('caught_up') %} &mdash; up to date at that point{% else %} &mdash; not finished yet, press Sync to continue{% endif %}.
+        {% else %}
+          Never synced yet.
+        {% endif %}
+      </p>
+      <form method="post" action="{{ url_for('admin_log_sync') }}" style="display: inline;">
+        <button type="submit">Sync from QRZ</button>
+      </form>
+      {% if sync_state.get('last_sync') %}
+        <form method="post" action="{{ url_for('admin_log_sync') }}" style="display: inline;"
+              onsubmit="return confirm('Re-read your whole QRZ Logbook from the start? Nothing gets duplicated; it just takes a few presses for a big log.');">
+          <input type="hidden" name="full" value="1">
+          <button type="submit" class="link-button">Re-sync everything from the start</button>
+        </form>
+      {% endif %}
+    {% else %}
+      <p class="flag-missing">
+        Not set up yet: add <code>QRZ_LOGBOOK_API_KEY</code> in Render's
+        Environment settings. Get the key from QRZ.com &rarr; Logbook &rarr;
+        Settings &rarr; API.
+      </p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h1>Or upload an ADIF file</h1>
+    <p class="muted">
+      An export from your logging software works too, and it's safe to mix
+      with QRZ syncs: duplicates are skipped, and missing details (UTC time,
+      grid square, DXCC entity) get filled in on records already here. If a
+      QSO has no country in the log, its entity is a best-effort guess from
+      the callsign prefix.
+    </p>
+    <form method="post" action="{{ url_for('admin_log') }}" enctype="multipart/form-data">
+      <label for="adif_file">ADIF log (.adi)</label>
+      <input type="file" id="adif_file" name="adif_file" accept=".adi,.adif" required>
+      <button type="submit">Import</button>
+    </form>
+  </section>
+{% endblock %}

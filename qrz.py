@@ -5,15 +5,15 @@ Minimal client for two separate QRZ.com APIs:
     subscriber) feature. A visitor supplies their own QRZ
     username/password; we exchange those for a short-lived session key
     and never persist the password itself. Used for looking up a
-    station's own profile (name/address/grid) -- `lookup_callsign()`,
+    station's own profile (name/address/grid) -- `lookup_callsign_raw()`,
     `lookup_location()`.
     Docs: https://www.qrz.com/XML/current_spec.html
 
   * The **Logbook API** (`logbook.qrz.com/api`) -- a different QRZ
     product with its own authentication: a static per-logbook API key
     (from a QRZ account's Logbook -> Settings -> API page), not a
-    username/password session. Used for pulling the actual QSOs in
-    Josh's own QRZ Logbook -- `fetch_logged_qsos()`. Requires the
+    username/password session. Used for mirroring every QSO in Josh's
+    own QRZ Logbook into the app's log store -- `fetch_log_page()`. Requires the
     logbook owner's account to be at the XML subscriber level or
     higher (same tier the XML API above needs), but the two APIs don't
     share a session -- this one's key is a standing secret, not
@@ -24,7 +24,8 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from datetime import date, timedelta
+import html
+from urllib.parse import unquote_plus
 
 import requests
 
@@ -136,89 +137,6 @@ def get_session_key(username: str, password: str) -> str:
     if not key:
         raise QrzError("QRZ did not return a session key.")
     return key
-
-
-def lookup_callsign(session_key: str, callsign: str) -> QrzRecord:
-    """Look up one callsign using an existing session key."""
-    resp = requests.get(
-        QRZ_XML_URL,
-        params={"s": session_key, "callsign": callsign},
-        timeout=10,
-    )
-    resp.raise_for_status()
-    root = ET.fromstring(resp.text)
-
-    session = root.find("qrz:Session", NS)
-    if session is not None:
-        error = _text(session, "Error")
-        if error:
-            raise QrzError(error)
-
-    callsign_el = root.find("qrz:Callsign", NS)
-    if callsign_el is None:
-        raise QrzError(f"No QRZ record found for {callsign}.")
-
-    mqsl_raw = _text(callsign_el, "mqsl")
-    mqsl = mqsl_raw == "1"
-    eqsl = _text(callsign_el, "eqsl") == "1"
-    lotw = _text(callsign_el, "lotw") == "1"
-    qslmgr = _text(callsign_el, "qslmgr")
-    has_address = bool(_text(callsign_el, "addr1"))
-
-    # QRZ's XML API doesn't expose a single "accepts Direct" boolean, and
-    # `mqsl` per QRZ's own spec is "will return paper QSL (0/1 or blank
-    # if unknown)" -- most operators simply never set it, so it's blank
-    # far more often than it's an explicit "1". Requiring mqsl == "1"
-    # threw away addresses for anyone who hadn't ticked that box, even
-    # with a perfectly good mailing address on file.
-    #
-    # Instead: show the address whenever one exists and there's no
-    # explicit signal against it -- an explicit opt-out (mqsl == "0")
-    # or a QSL manager on file (cards should route through them, not
-    # straight to the operator).
-    # `qslmgr` is free text, and operators use it two different ways in
-    # practice: naming an actual QSL manager to route cards through
-    # ("via N0XYZ"), or describing which methods *they themselves*
-    # accept ("Direct, LOTW, QRZ."). Only the first case should exclude
-    # someone -- if the text itself says "direct" (and doesn't negate
-    # it, e.g. "no direct"), that's actually a positive signal, not a
-    # manager to route around.
-    qslmgr_lower = qslmgr.lower()
-    negates_direct = "no direct" in qslmgr_lower or "not direct" in qslmgr_lower
-    mentions_direct = "direct" in qslmgr_lower and not negates_direct
-    has_manager = bool(qslmgr) and not mentions_direct
-
-    accepts_direct = has_address and mqsl_raw != "0" and not has_manager
-
-    # We only keep a mailing address on file for operators who actually
-    # want a direct card -- everyone else's address is simply discarded
-    # here and never reaches the database.
-    if accepts_direct:
-        address = _text(callsign_el, "addr1")
-        city = _text(callsign_el, "addr2")
-        state = _text(callsign_el, "state")
-        zip_code = _text(callsign_el, "zip")
-        country = _text(callsign_el, "country")
-    else:
-        address = city = state = zip_code = country = ""
-
-    return QrzRecord(
-        callsign=_text(callsign_el, "call") or callsign.upper(),
-        name=" ".join(
-            p for p in (_text(callsign_el, "fname"), _text(callsign_el, "name")) if p
-        ),
-        address=address,
-        city=city,
-        state=state,
-        zip_code=zip_code,
-        country=country,
-        grid=_text(callsign_el, "grid"),
-        mqsl=mqsl,
-        eqsl=eqsl,
-        lotw=lotw,
-        qsl_via=qslmgr,
-        accepts_direct=accepts_direct,
-    )
 
 
 def lookup_callsign_raw(session_key: str, callsign: str) -> QrzRecord:
@@ -338,127 +256,87 @@ def lookup_location(session_key: str, callsign: str) -> QrzLocation:
     )
 
 
-def _post(api_key: str, option: str) -> str:
-    """POST one FETCH request to the Logbook API with a given OPTION
-    string and return the response body completely unparsed -- no
-    RESULT/ADIF interpretation at all. Shared by _fetch() (below) and
-    by fetch_raw() (also below), which exists purely so
-    admin_qso_label()'s debug view can show Josh the literal bytes QRZ
-    sent back, in case this module's own parsing of them is ever in
-    question."""
+# ---------------------------------------------------------------------
+# QRZ Logbook API -- full-log sync by AFTERLOGID paging (2026-10-04)
+# ---------------------------------------------------------------------
+#
+# History: the first integration (Aug 2026) asked QRZ for one callsign at
+# a time with OPTION=CALL:<call>, and QRZ's CALL: filter came back empty
+# for every callsign tried while BETWEEN: worked -- so it was shelved.
+# This version never uses CALL: at all. It pages through the *whole*
+# logbook the way QRZ's own docs recommend ("MAX:250,AFTERLOGID:0", then
+# AFTERLOGID = highest app_qrzlog_logid seen + 1, until a page comes back
+# short) and lets the app do callsign matching locally, against its own
+# copy of the log. New QSOs always get a higher logid, so a later sync
+# that resumes from the saved cursor only pulls what's new.
+
+LOG_PAGE_SIZE = 250
+
+
+def _decode_adif_payload(adif_text: str) -> str:
+    """QRZ returns the ADIF field inside a form-style RESULT=...&ADIF=...
+    body, and depending on the endpoint/version its angle brackets have
+    been seen HTML-entity-escaped (&lt;call:4&gt;) or percent-encoded
+    (%3Ccall%3A4%3E) instead of raw. ADIF tag lengths count the *decoded*
+    characters, so decode once, before parsing, and only when the raw
+    form clearly isn't already there."""
+    if "<" in adif_text:
+        return adif_text
+    if "&lt;" in adif_text.lower():
+        return html.unescape(adif_text)
+    if "%3c" in adif_text.lower():
+        return unquote_plus(adif_text)
+    return adif_text
+
+
+def parse_logbook_response(text: str) -> tuple[dict, str]:
+    """Split a Logbook API response into (header fields, decoded ADIF).
+
+    The body is name=value pairs joined with "&" -- RESULT, COUNT,
+    LOGIDS, ... and ADIF last -- but the ADIF value itself can contain a
+    literal "&" (e.g. inside a COMMENT), so the header is everything
+    before the "ADIF=" marker and the ADIF is everything after it, never
+    a naive "&"-split of the whole body."""
+    head, marker, adif_text = text.partition("ADIF=")
+    fields = {}
+    for pair in head.rstrip("&").split("&"):
+        if "=" in pair:
+            k, v = pair.split("=", 1)
+            fields[k.strip().upper()] = unquote_plus(v.strip())
+    return fields, _decode_adif_payload(adif_text) if marker else ""
+
+
+def fetch_log_page(api_key: str, after_logid: int, page_size: int = LOG_PAGE_SIZE,
+                   timeout: float = 12) -> str:
+    """One page of Josh's QRZ Logbook: up to `page_size` QSOs whose
+    app_qrzlog_logid is >= `after_logid`, returned as decoded ADIF text
+    (feed it to adif.parse_adif()). Returns "" when nothing is left.
+
+    Raises QrzLogbookError for a rejected key or any other failure, with
+    QRZ's own REASON text when it gives one."""
     resp = requests.post(
         QRZ_LOGBOOK_API_URL,
         data={
             "KEY": api_key,
             "ACTION": "FETCH",
-            "OPTION": option,
+            "OPTION": f"MAX:{page_size},AFTERLOGID:{after_logid}",
         },
         headers={"User-Agent": QRZ_LOGBOOK_USER_AGENT},
-        timeout=10,
+        timeout=timeout,
     )
     resp.raise_for_status()
-    return resp.text
+    fields, adif_text = parse_logbook_response(resp.text)
 
-
-def _fetch(api_key: str, option: str) -> str:
-    """POST one FETCH request and return the raw ADIF text, parsed out
-    of QRZ's RESULT=...&ADIF=... response. Shared by fetch_logged_qsos()
-    and fetch_recent_qsos() below -- see fetch_logged_qsos()'s docstring
-    for why the response has to be parsed by locating the "ADIF=" marker
-    instead of a naive "&"-split."""
-    text = _post(api_key, option)
-
-    head, marker, adif_text = text.partition("ADIF=")
-    head_fields = dict(
-        pair.split("=", 1) for pair in head.rstrip("&").split("&") if "=" in pair
-    )
-
-    result = head_fields.get("RESULT", "")
-    if result == "AUTH":
-        raise QrzLogbookError("QRZ rejected the Logbook API key (check QRZ_LOGBOOK_API_KEY).")
+    result = fields.get("RESULT", "")
+    reason = fields.get("REASON", "")
+    if result == "AUTH" or "invalid api key" in reason.lower() or "access denied" in reason.lower():
+        raise QrzLogbookError(
+            "QRZ rejected the Logbook API key -- check QRZ_LOGBOOK_API_KEY on Render "
+            "(QRZ.com -> Logbook -> Settings -> API key)."
+        )
+    if fields.get("COUNT") == "0":
+        return ""  # QRZ reports "nothing past this point" as COUNT=0, sometimes with RESULT=FAIL
     if result != "OK":
-        raise QrzLogbookError(f"QRZ Logbook FETCH failed: {text[:200] or 'empty response'}")
-    if not marker:
-        # RESULT=OK but no ADIF field at all -- zero QSOs matched.
-        return ""
-
+        raise QrzLogbookError(f"QRZ Logbook fetch failed: {reason or resp.text[:200] or 'empty response'}")
     return adif_text
 
-
-def fetch_logged_qsos(api_key: str, callsign: str, max_results: int = 250) -> str:
-    """FETCH every QSO with `callsign` from Josh's own QRZ Logbook, and
-    return the raw ADIF text -- feed it straight into
-    `adif.parse_adif()`, which already handles arbitrary ADIF tags
-    generically. Raises QrzLogbookError on a non-OK RESULT, a request
-    that fails outright, or a response that doesn't look like this
-    API's format at all.
-
-    The response body is name=value pairs joined with "&"
-    (RESULT=OK&COUNT=2&LOGIDS=...&ADIF=...), but -- unlike a normal
-    query string -- QRZ doesn't reliably percent-encode the ADIF field,
-    which can itself contain a literal "&" (e.g. inside a COMMENT).
-    Naively splitting the whole body on "&" would corrupt that. QRZ's
-    docs order the response RESULT, COUNT, LOGIDS, ADIF with ADIF
-    always last, so this finds the "ADIF=" marker and takes everything
-    after it as one raw string instead of a field-by-field split.
-    """
-    return _fetch(api_key, call_option(callsign, max_results))
-
-
-def call_option(callsign: str, max_results: int = 250) -> str:
-    """The exact OPTION string fetch_logged_qsos() sends. Exposed (not
-    just inlined into fetch_logged_qsos()) so admin_qso_label()'s
-    raw-response debug view -- see fetch_raw() below -- can ask for
-    precisely the same request fetch_logged_qsos() makes, without a
-    second, easy-to-drift copy of this format string."""
-    return f"CALL:{callsign},MAX:{max_results}"
-
-
-def fetch_recent_qsos(api_key: str, days: int = 3, max_results: int = 100) -> str:
-    """FETCH the most recent QSOs logged under ANY callsign in the last
-    `days` days -- no CALL: filter at all. This is a diagnostic used by
-    admin_qso_label() when a CALL-filtered fetch_logged_qsos() comes up
-    empty for a callsign Josh is sure he's logged: it shows what the API
-    key can actually see right now, so a "logged under a slightly
-    different callsign format", a "QRZ's API hasn't caught up with the
-    website yet", and a genuine "it's just not there" can be told apart.
-
-    Deliberately uses BETWEEN: for the date-range scope rather than
-    QRZ's ALL keyword -- the docs say "When the option ALL is given,
-    only the options TYPE and STATUS may also be specified", which reads
-    as ALL *not* being combinable with MAX. BETWEEN is an ordinary scope
-    filter with no such restriction, so BETWEEN+MAX avoids that
-    ambiguity entirely while still capping the result size.
-
-    `days`/`max_results` default to a short window (3 days) and a
-    generous cap (100) rather than the original 30 days / 25 results --
-    a real production response confirmed QRZ returns BETWEEN matches in
-    ascending date order (oldest of the range first), so a 30-day
-    window on an active logging day silently truncated at MAX before
-    reaching anything from "today" at all. This diagnostic only ever
-    needs to answer "does the API see what I logged recently", so a
-    short window that can't be outrun by MAX is what actually makes it
-    diagnostic rather than a fixed, ever-stale slice of a month ago.
-    """
-    return _fetch(api_key, recent_option(days, max_results))
-
-
-def recent_option(days: int = 3, max_results: int = 100) -> str:
-    """The exact OPTION string fetch_recent_qsos() sends -- see
-    call_option() above for why this is exposed rather than
-    duplicated. See fetch_recent_qsos() above for why the defaults are
-    a short window (3 days) with a generous cap (100), not the original
-    30 days / 25 results."""
-    end = date.today()
-    start = end - timedelta(days=days)
-    return f"BETWEEN:{start.isoformat()}+{end.isoformat()},MAX:{max_results}"
-
-
-def fetch_raw(api_key: str, option: str) -> str:
-    """The literal, completely unparsed response body QRZ returns for a
-    given OPTION string -- bypasses all RESULT/ADIF interpretation.
-    Debug-only: lets admin_qso_label()'s debug view show Josh exactly
-    what QRZ sent back for a request, rather than asking him to trust
-    this module's own parsing of it (RESULT/COUNT/ADIF extraction) sight
-    unseen."""
-    return _post(api_key, option)

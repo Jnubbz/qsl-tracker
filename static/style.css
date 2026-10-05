@@ -43,6 +43,12 @@ body {
   gap: 1.25rem;
 }
 
+/* Inline links inside page content -- without this they fell back to the
+   browser's default dark blue, barely visible on the dark cards. Nav
+   links and .button-link keep their own colors. */
+main a:not(.button-link) { color: #6fd3a5; }
+main a:not(.button-link):hover { color: var(--ink); }
+
 .site-nav a {
   color: var(--muted);
   text-decoration: none;
@@ -172,6 +178,7 @@ button:hover { opacity: 0.9; }
 
 .results-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 1rem;
 }

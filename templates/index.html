@@ -2,12 +2,17 @@
 {% block title %}Log in -- QSL Tracker{% endblock %}
 {% block content %}
   <section class="card">
-    <h1>Log in with your QRZ account</h1>
+    <h1>Raw Address Ripper</h1>
     <p>
-      This tool uses the QRZ.com XML Logbook Data API, which requires a paid
-      QRZ subscriber account. Enter your own QRZ username and password below
-      -- we use them only to request a temporary session key from QRZ and
-      never save the password itself.
+      Pull mailing addresses from QRZ for the stations you need to QSL,
+      one callsign at a time or a whole ADIF log at once, and print them
+      on Avery 8160 address labels. Nothing you look up or upload is saved.
+    </p>
+    <p class="muted">
+      Uses the QRZ.com XML Data API, which needs a QRZ XML subscription.
+      Your password is only used to get a temporary session key from QRZ
+      and is never stored. Just here for the cards?
+      <a href="{{ url_for('photomap') }}">See the QSL Photo Map</a>.
     </p>
     <form method="post" action="{{ url_for('login') }}">
       <label for="qrz_username">QRZ username</label>

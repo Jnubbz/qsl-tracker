@@ -1,40 +1,109 @@
 {% extends "base.html" %}
-{% block title %}Print QSO Label{% endblock %}
+{% block title %}QSO Labels{% endblock %}
 {% block content %}
   <section class="card">
     <div class="dashboard-top">
-      <h1>Print a QSO label</h1>
+      <h1>QSO Labels</h1>
       <form method="post" action="{{ url_for('admin_logout') }}">
         <button type="submit" class="link-button">Log out (admin)</button>
       </form>
     </div>
     <p class="muted">
-      Pulls from your imported ADIF log (see
-      <a href="{{ url_for('admin_import_adif') }}">import/refresh your log</a>
-      if a recent QSO is missing) so you get callsign, date/time in UTC,
-      and a details grid of band/mode/freq/grid square/RST sent/received
-      (whichever your log actually has for that QSO) on a print-ready
-      label sized for one cell of an Avery 5163 / 8163 / 18163 sheet
-      (2"&times;4", 10
-      per page) &mdash; meant to be stuck onto the blank 2"&times;4" spot
-      on the card itself instead of hand-written. A QSO missing here just
-      means it isn't in your imported log yet. Looking for a
-      mailing-address label instead?
-      <a href="{{ url_for('admin_label') }}">Print a QSL mailing label</a>.
-      Want to batch by country instead of one callsign at a time?
-      <a href="{{ url_for('admin_qsos') }}">Browse logged QSOs by DXCC entity</a>.
+      Print your logged QSO details (callsign, UTC date/time, band, mode,
+      freq, grid, RST) on Avery 5163 / 8163 / 18163 labels (2"&times;4",
+      10 per sheet) to stick on the card. Check QSOs to batch them, or
+      Preview one to pick its exact sheet position. "Address" drops that
+      station into your
+      <a href="{{ url_for('raw_address') }}">Raw Address Ripper</a> batch
+      for the envelope.
     </p>
 
-    <form method="get" action="{{ url_for('admin_qso_label') }}" id="qso-label-form">
+    <div class="results-actions">
+      <span class="muted">
+        {{ total_qsos }} QSO{{ 's' if total_qsos != 1 else '' }} in your log
+        {%- if sync_state.get('last_sync') %} &middot; last QRZ sync {{ sync_state.last_sync | utc_time }}{% endif %}.
+      </span>
+      {% if logbook_configured %}
+        <form method="post" action="{{ url_for('admin_log_sync') }}" style="display: inline;">
+          <input type="hidden" name="next" value="{{ self_url }}">
+          <button type="submit">Sync from QRZ</button>
+        </form>
+      {% endif %}
+      <a href="{{ url_for('admin_log') }}">Your log</a>
+    </div>
+
+    <form method="get" action="{{ url_for('admin_qso_label') }}" id="qso-filter-form">
       <label for="callsign">Callsign</label>
-      <input type="text" id="callsign" name="callsign" value="{{ callsign }}" placeholder="e.g. W1AW" required autofocus>
-      <button type="submit">Find logged QSOs</button>
+      <input type="text" id="callsign" name="callsign" value="{{ callsign }}" placeholder="e.g. W1AW (partial is fine)" autofocus>
+
+      <label for="entity">DXCC entity</label>
+      <select id="entity" name="entity">
+        <option value="" {% if not entity %}selected{% endif %}>All entities</option>
+        {% for e in entities %}
+          <option value="{{ e }}" {% if e == entity %}selected{% endif %}>{{ e }}</option>
+        {% endfor %}
+      </select>
+
+      <button type="submit">Filter</button>
+      {% if callsign or entity %}
+        <a href="{{ url_for('admin_qso_label') }}">Clear filters</a>
+      {% endif %}
     </form>
   </section>
 
-  {% if error %}
+  {% if qso %}
     <section class="card">
-      <p class="flag-missing">{{ error }}</p>
+      <h1>Preview</h1>
+      <div class="label-preview label-preview--5163">
+        <p class="qso-preview-header">{{ qso_fields.header }}</p>
+        {% if qso_fields.subheader %}
+          <p class="qso-preview-subheader">{{ qso_fields.subheader }}</p>
+        {% endif %}
+        {% if qso_fields.pairs %}
+          <div class="qso-preview-rule"></div>
+          <div class="qso-preview-grid">
+            {% for label, value in qso_fields.pairs %}
+              <p class="qso-preview-pair"><span class="qso-preview-pair-label">{{ label }}:</span> {{ value }}</p>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </div>
+
+      <form method="get" action="{{ url_for('admin_qso_label') }}" style="margin-top: 1rem;">
+        <input type="hidden" name="callsign" value="{{ callsign }}">
+        <input type="hidden" name="entity" value="{{ entity }}">
+        <input type="hidden" name="qso_key" value="{{ qso['id'] }}">
+        <label for="position">Sheet position (1&ndash;{{ label_count }}, left-to-right, top-to-bottom)</label>
+        <select id="position" name="position">
+          {% for i in range(1, label_count + 1) %}
+            <option value="{{ i }}" {% if i == position %}selected{% endif %}>{{ i }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit">Update preview</button>
+      </form>
+
+      <p style="margin-top: 1rem;">
+        <a class="button-link"
+           href="{{ url_for('admin_qso_label_pdf', qso_key=qso['id'], position=position) }}"
+           target="_blank" rel="noopener">Download PDF label (position {{ position }})</a>
+        &nbsp;
+        <a href="{{ self_url }}">Close preview</a>
+      </p>
+
+      {% if not batch_full %}
+        <form method="post" action="{{ url_for('admin_qso_label_batch_add') }}" style="margin-top: 1rem;">
+          <input type="hidden" name="qso_id" value="{{ qso['id'] }}">
+          <input type="hidden" name="callsign" value="{{ qso['callsign'] }}">
+          <input type="hidden" name="next" value="{{ self_url }}">
+          <label for="batch-position">Or add it to the batch at position</label>
+          <select id="batch-position" name="position">
+            {% for i in range(1, label_count + 1) %}
+              <option value="{{ i }}" {% if i == next_batch_position %}selected{% endif %}>{{ i }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit">Add to batch</button>
+        </form>
+      {% endif %}
     </section>
   {% endif %}
 
@@ -58,6 +127,7 @@
               <td>
                 <form method="post" action="{{ url_for('admin_qso_label_batch_remove') }}" style="display: inline;">
                   <input type="hidden" name="position" value="{{ b.position }}">
+                  <input type="hidden" name="next" value="{{ self_url }}">
                   <button type="submit" class="link-button">Remove</button>
                 </form>
               </td>
@@ -69,133 +139,93 @@
         <a class="button-link" href="{{ url_for('admin_qso_label_batch_pdf') }}" target="_blank" rel="noopener">Download batch PDF ({{ batch | length }} label{{ 's' if batch | length != 1 else '' }})</a>
         &nbsp;
         <form method="post" action="{{ url_for('admin_qso_label_batch_clear') }}" style="display: inline;">
+          <input type="hidden" name="next" value="{{ self_url }}">
           <button type="submit" class="link-button">Clear batch</button>
         </form>
       </p>
     </section>
   {% endif %}
 
-  {% if matches %}
+  {% if address_batch_count %}
     <section class="card">
-      <h1>{{ matches | length }} logged QSO{{ 's' if matches | length != 1 else '' }} with {{ callsign }}</h1>
-      {% if batch_full %}
-        <p class="muted">Pick one to preview and print. Batch full ({{ label_count }} of {{ label_count }} positions used) -- remove one from the batch above to add more.</p>
-        <table class="contacts">
-          <thead>
-            <tr><th>Date</th><th>Time (UTC)</th><th>Band / Mode</th><th>Freq</th><th>RST S/R</th><th></th></tr>
-          </thead>
-          <tbody>
-            {% for m in matches %}
-              <tr>
-                <td>{{ m['qso_date'] or '-' }}</td>
-                <td>{{ m['time_on'] or '-' }}</td>
-                <td>{{ [m['band'], m['mode']] | select | join(' / ') or '-' }}</td>
-                <td>{{ m['freq'] or '-' }}</td>
-                <td>{{ m['rst_sent'] or '-' }} / {{ m['rst_rcvd'] or '-' }}</td>
-                <td><a href="{{ url_for('admin_qso_label', callsign=callsign, qso_key=m['id'], position=position) }}">Select</a></td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      {% else %}
-        <p class="muted">
-          Pick one to preview and print, or check the ones you want
-          {{ 'and add them all to the batch at once' if matches | length > 1 else 'and add to the batch' }}.
-        </p>
-        <form method="post" action="{{ url_for('admin_qso_label_batch_add_selected') }}">
-          <input type="hidden" name="callsign" value="{{ callsign }}">
-          <table class="contacts">
-            <thead>
-              <tr>
-                <th>
-                  <label class="visually-hidden" for="select-all-qsos">Select all</label>
-                  <input type="checkbox" id="select-all-qsos" onclick="document.querySelectorAll('.qso-select').forEach(function(cb){cb.checked=this.checked;}, this)">
-                </th>
-                <th>Date</th><th>Time (UTC)</th><th>Band / Mode</th><th>Freq</th><th>RST S/R</th><th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for m in matches %}
-                <tr>
-                  <td>
-                    <label class="visually-hidden" for="qso-{{ m['id'] }}">Select QSO from {{ m['qso_date'] or 'unknown date' }}</label>
-                    <input class="qso-select" type="checkbox" id="qso-{{ m['id'] }}" name="qso_id" value="{{ m['id'] }}">
-                  </td>
-                  <td>{{ m['qso_date'] or '-' }}</td>
-                  <td>{{ m['time_on'] or '-' }}</td>
-                  <td>{{ [m['band'], m['mode']] | select | join(' / ') or '-' }}</td>
-                  <td>{{ m['freq'] or '-' }}</td>
-                  <td>{{ m['rst_sent'] or '-' }} / {{ m['rst_rcvd'] or '-' }}</td>
-                  <td><a href="{{ url_for('admin_qso_label', callsign=callsign, qso_key=m['id'], position=position) }}">Select</a></td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-          <p style="margin-top: 1rem;">
-            <button type="submit">Add checked to batch</button>
-            <span class="muted">
-              Positions fill in automatically, next-available first. Want a
-              specific position for just one? Click "Select" on it to
-              preview, then add it from there.
-            </span>
-          </p>
-        </form>
-      {% endif %}
-    </section>
-  {% endif %}
-
-  {% if qso %}
-    <section class="card">
-      <h1>Preview</h1>
-      <div class="label-preview label-preview--5163">
-        <p class="qso-preview-header">{{ qso_fields.header }}</p>
-        {% if qso_fields.subheader %}
-          <p class="qso-preview-subheader">{{ qso_fields.subheader }}</p>
-        {% endif %}
-        {% if qso_fields.pairs %}
-          <div class="qso-preview-rule"></div>
-          <div class="qso-preview-grid">
-            {% for label, value in qso_fields.pairs %}
-              <p class="qso-preview-pair"><span class="qso-preview-pair-label">{{ label }}:</span> {{ value }}</p>
-            {% endfor %}
-          </div>
-        {% endif %}
-      </div>
-
-      <form method="get" action="{{ url_for('admin_qso_label') }}" style="margin-top: 1rem;">
-        <input type="hidden" name="callsign" value="{{ callsign }}">
-        <input type="hidden" name="qso_key" value="{{ qso['id'] }}">
-        <label for="position">Sheet position (1&ndash;{{ label_count }}, left-to-right, top-to-bottom)</label>
-        <select id="position" name="position">
-          {% for i in range(1, label_count + 1) %}
-            <option value="{{ i }}" {% if i == position %}selected{% endif %}>{{ i }}</option>
-          {% endfor %}
-        </select>
-        <button type="submit">Update preview</button>
-      </form>
-
-      <p class="muted" style="margin-top: 1rem;">
-        Position {{ position }} of {{ label_count }} on the Avery 5163/8163/18163 layout.
+      <p class="muted">
+        {{ address_batch_count }} of {{ mailing_label_count }} addresses in your
+        Raw Address Ripper batch &mdash;
+        <a href="{{ url_for('raw_address') }}">open it to print the envelope labels</a>.
       </p>
-      <a class="button-link"
-         href="{{ url_for('admin_qso_label_pdf', qso_key=qso['id'], position=position) }}"
-         target="_blank" rel="noopener">Download PDF label</a>
-      &nbsp;
-      <a href="{{ url_for('admin_qso_label', callsign=callsign) }}">Pick a different QSO with {{ callsign }}</a>
-
-      {% if not batch_full %}
-        <form method="post" action="{{ url_for('admin_qso_label_batch_add') }}" style="margin-top: 1rem;">
-          <input type="hidden" name="qso_id" value="{{ qso['id'] }}">
-          <input type="hidden" name="callsign" value="{{ callsign }}">
-          <label for="batch-position">Or add this one to the batch at position</label>
-          <select id="batch-position" name="position">
-            {% for i in range(1, label_count + 1) %}
-              <option value="{{ i }}" {% if i == next_batch_position %}selected{% endif %}>{{ i }}</option>
-            {% endfor %}
-          </select>
-          <button type="submit">Add to batch</button>
-        </form>
-      {% endif %}
     </section>
   {% endif %}
+
+  <section class="card">
+    <h1>
+      {{ row_count }} logged QSO{{ 's' if row_count != 1 else '' }}
+      {% if callsign %}matching &ldquo;{{ callsign }}&rdquo;{% endif %}
+      {% if entity %}from {{ entity }}{% endif %}
+    </h1>
+    {% if row_count > row_cap %}
+      <p class="muted">Showing the {{ row_cap }} most recent &mdash; filter by callsign or entity to reach older ones.</p>
+    {% endif %}
+
+    {% if rows %}
+      <form method="post" action="{{ url_for('admin_qso_label_batch_add_selected') }}" id="add-selected-form">
+        <input type="hidden" name="next" value="{{ self_url }}">
+      </form>
+      <table class="contacts">
+        <thead>
+          <tr>
+            <th>
+              {% if not batch_full %}
+                <label class="visually-hidden" for="select-all-qsos">Select all</label>
+                <input type="checkbox" id="select-all-qsos" onclick="document.querySelectorAll('.qso-select').forEach(function(cb){cb.checked=this.checked;}, this)">
+              {% endif %}
+            </th>
+            <th>Callsign</th><th>Date</th><th>Time (UTC)</th><th>Band / Mode</th><th>Entity</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for q in rows %}
+            <tr>
+              <td>
+                {% if not batch_full %}
+                  <label class="visually-hidden" for="qso-{{ q['id'] }}">Select {{ q['callsign'] }} {{ q['qso_date'] }}</label>
+                  <input class="qso-select" type="checkbox" id="qso-{{ q['id'] }}" name="qso_id" value="{{ q['id'] }}" form="add-selected-form">
+                {% endif %}
+              </td>
+              <td>{{ q['callsign'] }}</td>
+              <td>{{ q['qso_date'] or '-' }}</td>
+              <td>{{ q['time_on'] or '-' }}</td>
+              <td>{{ [q['band'], q['mode']] | select | join(' / ') or '-' }}</td>
+              <td>{{ q.get('dxcc_entity') or '-' }}</td>
+              <td>
+                <a href="{{ url_for('admin_qso_label', callsign=callsign or None, entity=entity or None, qso_key=q['id']) }}">Preview</a>
+                {% if has_qrz_session %}
+                  <form method="post" action="{{ url_for('raw_address_batch_add') }}" style="display: inline;">
+                    <input type="hidden" name="callsign" value="{{ q['callsign'] }}">
+                    <input type="hidden" name="next" value="{{ self_url }}">
+                    <button type="submit" class="link-button">Address</button>
+                  </form>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p style="margin-top: 1rem;">
+        {% if batch_full %}
+          <span class="muted">Batch full ({{ label_count }} of {{ label_count }}) &mdash; download or remove some above to add more.</span>
+        {% else %}
+          <button type="submit" form="add-selected-form">Add checked to batch</button>
+          <span class="muted">Positions fill in automatically, next-available first.</span>
+        {% endif %}
+      </p>
+    {% else %}
+      <p class="muted">
+        {% if total_qsos %}
+          No logged QSOs match this filter.
+        {% else %}
+          Your log is empty here &mdash; <a href="{{ url_for('admin_log') }}">sync it from QRZ or import an ADIF file</a>.
+        {% endif %}
+      </p>
+    {% endif %}
+  </section>
 {% endblock %}

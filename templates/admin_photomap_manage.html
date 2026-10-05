@@ -3,9 +3,16 @@
 {% block content %}
   <section class="card">
     <div class="dashboard-top">
-      <h1>Manage QSL cards</h1>
-      <a href="{{ url_for('admin_photomap_upload') }}">Upload another</a>
+      <h1>QSL cards</h1>
+      <form method="post" action="{{ url_for('admin_logout') }}">
+        <button type="submit" class="link-button">Log out (admin)</button>
+      </form>
     </div>
+    <p class="results-actions">
+      <a class="button-link" href="{{ url_for('admin_photomap_upload') }}">Upload a card</a>
+      <a class="button-link" href="{{ url_for('admin_log') }}">Your log (sync / import)</a>
+      <a href="{{ url_for('photomap') }}">View the public map</a>
+    </p>
     <p class="muted">
       Every card that's been uploaded. Anything flagged below still shows up on
       the public map -- it just displays as incomplete (no photo, or no QSO

@@ -43,6 +43,8 @@ def _empty() -> dict:
         "my_qsos": [],
         "next_photo_card_id": 1,
         "next_my_qso_id": 1,
+        # QRZ Logbook sync cursor -- see qrz_sync_state() below.
+        "qrz_sync": {},
     }
 
 
@@ -259,6 +261,22 @@ def _entity_for(callsign: str, adif_country: str) -> str:
     return dxcc.entity_for_callsign(callsign) or ""
 
 
+def _norm_freq(freq) -> str:
+    """Frequency as a dedupe-key string that doesn't care how a logger
+    formatted it -- "14.074", "14.07400" and "14.0740" all become
+    "14.074". Without this, the same QSO arriving once from an ADIF
+    upload and once from a QRZ Logbook sync (two different programs
+    writing the same number differently) would be stored twice."""
+    try:
+        return f"{float(freq):.4f}".rstrip("0").rstrip(".")
+    except (TypeError, ValueError):
+        return (freq or "").strip()
+
+
+def _dedupe_key(callsign, qso_date, band, mode, freq) -> tuple:
+    return (callsign, qso_date or "", (band or "").upper(), (mode or "").upper(), _norm_freq(freq))
+
+
 def import_my_qsos(qsos: list) -> tuple[int, int]:
     """Bulk-add parsed ADIF QSOs (adif.AdifQso), skipping ones with no
     callsign. De-duplicates against (callsign, qso_date, band, mode,
@@ -271,7 +289,7 @@ def import_my_qsos(qsos: list) -> tuple[int, int]:
     backfilled) counts."""
     data = _load()
     existing = {
-        (q["callsign"], q.get("qso_date"), q.get("band"), q.get("mode"), q.get("freq")): q
+        _dedupe_key(q["callsign"], q.get("qso_date"), q.get("band"), q.get("mode"), q.get("freq")): q
         for q in data["my_qsos"]
     }
 
@@ -282,13 +300,8 @@ def import_my_qsos(qsos: list) -> tuple[int, int]:
         if not callsign:
             continue
         f = qso.fields
-        key = (
-            callsign,
-            f.get("qso_date", ""),
-            f.get("band", "").upper(),
-            f.get("mode", "").upper(),
-            f.get("freq", ""),
-        )
+        key = _dedupe_key(callsign, f.get("qso_date", ""), f.get("band", ""), f.get("mode", ""), f.get("freq", ""))
+        qrz_logid = f.get("app_qrzlog_logid", "")
         time_on = f.get("time_on", "")
         gridsquare = f.get("gridsquare", "")
         dxcc_entity = _entity_for(callsign, f.get("country", ""))
@@ -304,6 +317,9 @@ def import_my_qsos(qsos: list) -> tuple[int, int]:
                 row_changed = True
             if dxcc_entity and not existing_row.get("dxcc_entity"):
                 existing_row["dxcc_entity"] = dxcc_entity
+                row_changed = True
+            if qrz_logid and not existing_row.get("qrz_logid"):
+                existing_row["qrz_logid"] = qrz_logid
                 row_changed = True
             if row_changed:
                 backfilled += 1
@@ -323,6 +339,7 @@ def import_my_qsos(qsos: list) -> tuple[int, int]:
             "rst_rcvd": f.get("rst_rcvd", ""),
             "gridsquare": gridsquare,
             "dxcc_entity": dxcc_entity,
+            "qrz_logid": qrz_logid,
             "created_at": time.time(),
         }
         data["my_qsos"].append(new_row)
@@ -385,3 +402,23 @@ def list_dxcc_entities() -> list[str]:
     data = _load()
     seen = {q["dxcc_entity"] for q in data["my_qsos"] if q.get("dxcc_entity")}
     return sorted(seen)
+
+
+# ---------------------------------------------------------------------
+# QRZ Logbook sync cursor
+# ---------------------------------------------------------------------
+
+def qrz_sync_state() -> dict:
+    """Where the QRZ Logbook sync left off: `next_logid` (the AFTERLOGID
+    to ask for next -- 0 means "start of the logbook"), `last_sync` (unix
+    time of the last page fetched), and `caught_up` (True once a sync
+    reached the end of the logbook, so the next one only pulls new QSOs).
+    Empty dict if a sync has never run."""
+    return dict(_load().get("qrz_sync") or {})
+
+
+def save_qrz_sync_state(state: dict) -> None:
+    data = _load()
+    data["qrz_sync"] = state
+    _save(data)
+

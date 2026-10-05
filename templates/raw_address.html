@@ -12,13 +12,10 @@
     <p class="muted">
       Look up a callsign against QRZ and get whatever mailing address is on
       file &mdash; <strong>regardless of whether they've marked it available
-      for a direct card.</strong> The regular
-      <a href="{{ url_for('dashboard') }}">Dashboard</a> hides an address
-      unless QRZ shows an explicit accept (or at least no opt-out), which is
-      right for "who volunteered a direct card" but useless when a contest
-      exchange, an on-air request, or a club roster already told you a
-      station wants a card &mdash; their QRZ page just never says "direct"
-      anywhere. Real print-ready PDF labels, sized for one cell of an Avery
+      for a direct card</strong>, since a contest exchange, an on-air
+      request, or a club roster often tells you a station wants a card
+      when their QRZ page never says "direct." When QRZ shows an opt-out or
+      a QSL manager, you'll see a heads-up before you print. Real print-ready PDF labels, sized for one cell of an Avery
       8160 / 5160 / 5260 sheet (1"&times;2-5/8", 30 per page, 3 columns
       &times; 10 rows). <strong>Nothing you look up or upload here is ever
       saved</strong> &mdash; not the address, not your ADIF file, not the

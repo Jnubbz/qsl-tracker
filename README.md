@@ -1,54 +1,36 @@
 # QSL Tracker
 
-A small Flask app for hams: look up callsigns (one at a time, or in bulk
-from an ADIF log) against [QRZ.com](https://www.qrz.com)'s XML Logbook
-Data API, and keep track of which operators want a **direct** paper QSL
-card -- so you know who to actually mail a card to.
+A small Flask app for hams, part of [KN0BLE.com](https://kn0ble.com):
 
-Part of the [KN0BLE.com](https://kn0ble.com) site, callsign KN0BLE.
+- **Raw Address Ripper** (`/raw-address`, public) -- log in with your own
+  QRZ XML subscriber account, look up one callsign or upload an ADIF log,
+  and print the mailing addresses QRZ has on file onto Avery 8160 labels.
+  Shows a heads-up when a station has opted out of paper cards or lists
+  a QSL manager. Nothing looked up or uploaded is stored.
+- **QSO Labels** (`/admin/qso-label`, admin) -- your own logged QSOs,
+  filterable by callsign or DXCC entity, printed onto Avery 5163 labels
+  to stick on the card.
+- **QSL Cards / Photo Map** -- admin upload of scanned cards, shown on
+  the public `/photomap`.
+- **Your log** (`/admin/log`, admin) -- the copy of your log behind QSO
+  Labels, filled by "Sync from QRZ" (QRZ Logbook API) or an ADIF upload.
 
 ## How it works
 
-- No accounts. Each visitor gets an anonymous, cookie-based session that
-  keeps their results separate from everyone else's.
+- No accounts. Each visitor gets an anonymous, cookie-based session.
 - Visitors log in with their **own** QRZ XML subscriber username and
-  password. Those credentials are used once to fetch a short-lived QRZ
-  session key and are never stored -- the key itself lives server-side
-  in SQLite, keyed by the anonymous session id; the cookie only ever
-  holds that id, never the key.
-- Look up a single callsign, or upload an `.adi` / `.adif` log file to
-  look up every callsign in it (capped at 200 per upload). Uploads pace
-  their QRZ lookups with a short delay between each, and will stop
-  early -- with a clear message about how many were completed -- if
-  either the request is running long enough to risk a host-level timeout
-  or QRZ starts erroring repeatedly in a row. Re-uploading the same file
-  picks up the rest (it re-fetches everything, not just what's missing,
-  so it's a little wasteful on a very large log, but simple and correct).
-- A mailing address is only kept for operators who look like they want a
-  direct card: an address is on file, QRZ's `mqsl` field isn't explicitly
-  set to "no" (most operators never set it either way, so a blank `mqsl`
-  doesn't disqualify them), and the `qslmgr` text doesn't name an actual
-  manager to route through. That last one is a free-text field operators
-  use two different ways -- naming a real manager ("via N0XYZ") or just
-  listing which methods *they* accept ("Direct, LOTW, QRZ.") -- so a
-  mention of "direct" in that text counts as a positive signal rather
-  than an exclusion, unless it's negated ("no direct"). See the comment
-  in `qrz.py` if you want to tune that rule further. Everyone else shows
-  up in the list with `not stored` in the address column.
-- A toggle switches between "all looked-up contacts" and "direct QSL
-  only".
-- "Export CSV" downloads every direct-QSL contact with an address on
-  file as two columns: callsign, and a single "Mailing Label" cell with
-  the name and full address (street, city/state/zip, country) on their
-  own lines inside that one cell -- select it, paste, and it's a
-  complete label, no reassembling separate columns. Independent of
-  whichever table filter is currently active, since a mailing list only
-  makes sense for contacts with an address. Clicking the link shows a
-  one-time heads-up that those cells have line breaks baked in, since
-  most spreadsheet apps don't auto-expand row height to show them --
-  turning on "Wrap Text" (or widening the row) reveals the full address.
-- Results are stored in SQLite, scoped to your session, and purged
-  automatically after 24 hours.
+  password, used once to fetch a short-lived QRZ session key; the
+  password is never stored and the key lives server-side in SQLite,
+  keyed by the anonymous session id.
+- Ripper ADIF uploads are capped at 200 distinct callsigns, paced
+  between QRZ requests, and stop early (with a clear message) on a long
+  request or repeated QRZ failures.
+- **QRZ Logbook sync** pages through the whole logbook with
+  `OPTION=MAX:250,AFTERLOGID:n` (QRZ's documented pagination), saving
+  the cursor after every page, so the first sync walks everything and
+  later ones fetch only new QSOs. It deliberately never uses QRZ's
+  `CALL:` filter, which returned nothing in testing. Needs
+  `QRZ_LOGBOOK_API_KEY` (QRZ.com -> Logbook -> Settings -> API).
 - `/request-qsl` is a separate, public, unauthenticated form (no QRZ
   login needed) for the reverse case: someone worked KN0BLE and wants a
   card mailed back to *them*. It's embedded directly on kn0ble.com
@@ -197,11 +179,10 @@ Uploading is admin-only (just Josh) -- there's no public upload:
   `ADMIN_PASSWORD` env var. Separate from the QRZ login system the rest
   of the app uses (that's per-visitor and anonymous; this is one
   person's admin area).
-- `/admin/photomap/import-adif` -- upload your own ADIF log so the
+- `/admin/log` -- sync your QRZ Logbook or upload an ADIF log so the
   upload form below can auto-fill QSO details (date/band/mode/frequency/
-  RST) for a callsign instead of typing them by hand. Safe to re-upload
-  the same or an overlapping log -- duplicates are skipped. This never
-  touches QRZ; it only reads your log file.
+  RST) for a callsign instead of typing them by hand. Safe to mix and
+  repeat -- duplicates are skipped.
 - `/admin/photomap/upload` -- pick a callsign, attach one or more
   front-of-card photos, fill in (or accept the auto-filled) QSO details,
   save. A callsign's map location (country/state/grid/lat-lon) is looked
@@ -288,10 +269,9 @@ Early / brainstorming-to-working-prototype stage. Next up:
 - [x] Server-side session store for the QRZ session key -- it now lives
       in SQLite (`auth_sessions`, keyed by the anonymous session id) and
       the cookie only ever carries that id, never the key itself
-- [x] Export results (CSV) for printing mailing labels -- "Export CSV"
-      link on the dashboard, always the direct-QSL contacts with an
-      address on file regardless of which table filter is active; each
-      row's address cell is one paste-ready label block (see above)
+- [x] Print-ready mailing labels -- the Raw Address Ripper (replaced the
+      old Dashboard + CSV export on 2026-10-04)
+- [x] QRZ Logbook sync for QSO labels (AFTERLOGID paging, 2026-10-04)
 - [x] "Request a QSL Card" -- public form (embedded on kn0ble.com) for
       visitors to request a card back, emailed to Josh via Gmail SMTP
       (see "Email notifications" above)
