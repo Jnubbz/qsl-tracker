@@ -35,11 +35,15 @@
         {% endif %}
       </p>
       {% if sync_state.get('qrz_total') is not none %}
-        <p class="{{ 'flag-missing' if sync_state.qrz_total > qso_count else 'muted' }}">
+        {% set dupes = (sync_state.get('qrz_dupe_logids') or []) | length %}
+        {% set missing = sync_state.qrz_total - qso_count - dupes %}
+        <p class="{{ 'flag-missing' if missing > 0 else 'muted' }}">
           QRZ Logbook: {{ sync_state.qrz_total }} QSOs &middot; this log: {{ qso_count }}
-          {%- if sync_state.qrz_total > qso_count %} &mdash; {{ sync_state.qrz_total - qso_count }} missing here.
+          {%- if dupes %} &middot; {{ dupes }} QRZ entr{{ 'y is a duplicate' if dupes == 1 else 'ies are duplicates' }}
+            (same station, date, band and mode within 2 minutes of another entry), counted once here{% endif %}
+          {%- if missing > 0 %} &mdash; {{ missing }} missing here.
             Press "Re-sync everything" (and Sync again until it says up to date) to pull them in.
-          {%- elif sync_state.qrz_total == qso_count %} &mdash; they match.
+          {%- elif missing == 0 %} &mdash; everything accounted for.
           {%- else %} &mdash; this log has QSOs QRZ doesn't (e.g. from an ADIF of contacts never uploaded to QRZ).{% endif %}
         </p>
       {% endif %}

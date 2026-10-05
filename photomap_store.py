@@ -304,7 +304,7 @@ def _find_same_qso(candidates: list[dict], time_on: str) -> dict | None:
     return untimed
 
 
-def import_my_qsos(qsos: list) -> tuple[int, int]:
+def import_my_qsos(qsos: list, qrz_dupes: set | None = None) -> tuple[int, int]:
     """Bulk-add parsed ADIF QSOs (adif.AdifQso), skipping ones with no
     callsign. De-duplicates against (callsign, qso_date, band, mode,
     freq) plus time_on within 2 minutes (see _find_same_qso()) so re-uploading the same or an overlapping log is safe and
@@ -353,6 +353,12 @@ def import_my_qsos(qsos: list) -> tuple[int, int]:
             if qrz_logid and not existing_row.get("qrz_logid"):
                 existing_row["qrz_logid"] = qrz_logid
                 row_changed = True
+            elif (qrz_dupes is not None and qrz_logid
+                  and existing_row.get("qrz_logid") not in ("", None, qrz_logid)):
+                # A *second* QRZ entry for a contact we already hold under a
+                # different QRZ log id: QRZ has the same QSO twice (e.g.
+                # uploaded by both the logger and WSJT-X). Counted once here.
+                qrz_dupes.add(qrz_logid)
             if row_changed:
                 backfilled += 1
             continue

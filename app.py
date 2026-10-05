@@ -1084,8 +1084,13 @@ def admin_log_sync():
         mode = "window"
     started_at = time.monotonic()
     pages = fetched = added = backfilled = 0
+    unparsed = 0
     caught_up = False
     error = None
+    # QRZ log ids that turned out to be a second QRZ entry for a contact
+    # already held here. Accumulated across the presses of a full re-read
+    # (a fresh full re-read starts the tally over).
+    qrz_dupes = set() if full else set(state.get("qrz_dupe_logids") or [])
 
     while True:
         if pages and time.monotonic() - started_at > QRZ_SYNC_TIME_BUDGET_SECONDS:
@@ -1101,6 +1106,11 @@ def admin_log_sync():
             break
 
         qsos = parse_adif(adif_text) if adif_text else []
+        # How many records QRZ actually *sent* -- not how many parsed. A
+        # record that fails to parse must never make a full page look short
+        # (which would end the sync early, believing it reached the end).
+        sent = adif_text.lower().count("<eor>") if adif_text else 0
+        unparsed += max(0, sent - len(qsos))
         pages += 1
         if not qsos:
             caught_up = True
@@ -1123,7 +1133,7 @@ def admin_log_sync():
             error = "QRZ returned QSOs without log ids, so the sync can't page past them."
             break
         try:
-            a, b = photomap_store.import_my_qsos(qsos)
+            a, b = photomap_store.import_my_qsos(qsos, qrz_dupes)
         except S3Error as exc:
             error = s3_config_hint(exc)
             break
@@ -1138,11 +1148,12 @@ def admin_log_sync():
                 "caught_up": False,
                 "since": since,
                 "mode": mode,
+                "qrz_dupe_logids": sorted(qrz_dupes),
             })
         except S3Error as exc:
             error = s3_config_hint(exc)
             break
-        if len(qsos) < LOG_PAGE_SIZE:
+        if sent < LOG_PAGE_SIZE:
             caught_up = True
             break
 
@@ -1161,15 +1172,17 @@ def admin_log_sync():
                 adif_text = fetch_log_page(QRZ_LOGBOOK_API_KEY, recent_cursor,
                                            since=recent_since, until=recent_until)
                 qsos = parse_adif(adif_text) if adif_text else []
+                sent = adif_text.lower().count("<eor>") if adif_text else 0
+                unparsed += max(0, sent - len(qsos))
                 if not qsos:
                     break
-                a_, b_ = photomap_store.import_my_qsos(qsos)
+                a_, b_ = photomap_store.import_my_qsos(qsos, qrz_dupes)
                 recent_added += a_
                 added += a_
                 backfilled += b_
                 fetched += len(qsos)
                 ids = [_parse_int(q.fields.get("app_qrzlog_logid"), default=0) for q in qsos]
-                if len(qsos) < LOG_PAGE_SIZE or not any(ids):
+                if sent < LOG_PAGE_SIZE or not any(ids):
                     break
                 recent_cursor = max(ids) + 1
         except (QrzError, S3Error) as exc:
@@ -1203,6 +1216,7 @@ def admin_log_sync():
                 "caught_up": not no_anchor,
                 "since": since if no_anchor else None,
                 "mode": None,
+                "qrz_dupe_logids": sorted(qrz_dupes),
             })
         except S3Error as exc:
             error = error or s3_config_hint(exc)
@@ -1220,12 +1234,15 @@ def admin_log_sync():
             "Stopped partway to stay under the server's time limit -- press Sync again to keep going"
             + (" (it picks up the full re-read where it left off)." if mode == "full" else ".")
         )
+    if unparsed:
+        parts.append(f"{unparsed} record(s) from QRZ couldn't be read and were skipped (see Render logs).")
+        logger.warning("QRZ sync: %d record(s) failed to parse", unparsed)
     if caught_up and not error and qrz_total is not None:
         try:
             here = photomap_store.count_my_qsos()
         except S3Error:
             here = None
-        if here is not None and here < qrz_total:
+        if here is not None and here + len(qrz_dupes) < qrz_total:
             parts.append(
                 f"QRZ has {qrz_total} QSOs, this log has {here} -- press "
                 "\"Re-sync everything\" on the Your log page to pull in the rest."
