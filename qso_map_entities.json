@@ -1,0 +1,2455 @@
+{
+"entities": {
+"Afghanistan": {
+"aliases": [],
+"area": "a3",
+"lat": 34.7,
+"lon": 65.8,
+"prefix": "YA"
+},
+"Agalega & St. Brandon": {
+"aliases": [
+"Agal\u00e9ga and Saint Brandon"
+],
+"area": null,
+"lat": -10.45,
+"lon": 56.67,
+"prefix": "3B6"
+},
+"Aland Islands": {
+"aliases": [],
+"area": "a7",
+"lat": 60.13,
+"lon": 20.37,
+"prefix": "OH0"
+},
+"Alaska": {
+"aliases": [],
+"area": "a288",
+"lat": 61.4,
+"lon": -148.87,
+"prefix": "KL"
+},
+"Albania": {
+"aliases": [],
+"area": "a6",
+"lat": 41.0,
+"lon": 20.0,
+"prefix": "ZA"
+},
+"Algeria": {
+"aliases": [],
+"area": "a77",
+"lat": 28.0,
+"lon": 2.0,
+"prefix": "7X"
+},
+"American Samoa": {
+"aliases": [],
+"area": "a12",
+"lat": -14.32,
+"lon": -170.78,
+"prefix": "KH8"
+},
+"Amsterdam & St. Paul Is.": {
+"aliases": [],
+"area": null,
+"lat": -37.85,
+"lon": 77.53,
+"prefix": "FT/z"
+},
+"Andaman & Nicobar Is.": {
+"aliases": [],
+"area": "a121",
+"lat": 12.37,
+"lon": 92.78,
+"prefix": "VU4"
+},
+"Andorra": {
+"aliases": [],
+"area": "a8",
+"lat": 42.58,
+"lon": 1.62,
+"prefix": "C3"
+},
+"Angola": {
+"aliases": [],
+"area": "a4",
+"lat": -12.5,
+"lon": 18.5,
+"prefix": "D2"
+},
+"Anguilla": {
+"aliases": [],
+"area": "a5",
+"lat": 18.23,
+"lon": -63.0,
+"prefix": "VP2E"
+},
+"Annobon Island": {
+"aliases": [],
+"area": null,
+"lat": -1.43,
+"lon": 5.62,
+"prefix": "3C0"
+},
+"Antarctica": {
+"aliases": [],
+"area": "a13",
+"lat": -90.0,
+"lon": -0.0,
+"prefix": "CE9"
+},
+"Antigua & Barbuda": {
+"aliases": [
+"Antigua and Barbuda"
+],
+"area": "a1",
+"lat": 17.07,
+"lon": -61.8,
+"prefix": "V2"
+},
+"Argentina": {
+"aliases": [],
+"area": "a10",
+"lat": -34.8,
+"lon": -65.92,
+"prefix": "LU"
+},
+"Armenia": {
+"aliases": [],
+"area": "a11",
+"lat": 40.4,
+"lon": 44.9,
+"prefix": "EK"
+},
+"Aruba": {
+"aliases": [],
+"area": "a0",
+"lat": 12.53,
+"lon": -69.98,
+"prefix": "P4"
+},
+"Ascension Island": {
+"aliases": [],
+"area": "a23",
+"lat": -7.93,
+"lon": -14.37,
+"prefix": "ZD8"
+},
+"Asiatic Russia": {
+"aliases": [],
+"area": "a232",
+"lat": 55.88,
+"lon": 84.08,
+"prefix": "UA9"
+},
+"Asiatic Turkey": {
+"aliases": [
+"Turkey"
+],
+"area": "a279",
+"lat": 39.18,
+"lon": 35.65,
+"prefix": "TA"
+},
+"Austral Islands": {
+"aliases": [],
+"area": null,
+"lat": -23.37,
+"lon": -149.48,
+"prefix": "FO/a"
+},
+"Australia": {
+"aliases": [],
+"area": "a20",
+"lat": -23.7,
+"lon": 132.33,
+"prefix": "VK"
+},
+"Austria": {
+"aliases": [],
+"area": "a21",
+"lat": 47.33,
+"lon": 13.33,
+"prefix": "OE"
+},
+"Aves Island": {
+"aliases": [],
+"area": null,
+"lat": 15.67,
+"lon": -63.6,
+"prefix": "YV0"
+},
+"Azerbaijan": {
+"aliases": [],
+"area": "a22",
+"lat": 40.45,
+"lon": 47.37,
+"prefix": "4J"
+},
+"Azores": {
+"aliases": [],
+"area": "a215",
+"lat": 38.7,
+"lon": -27.23,
+"prefix": "CU"
+},
+"Bahamas": {
+"aliases": [],
+"area": "a33",
+"lat": 24.25,
+"lon": -76.0,
+"prefix": "C6"
+},
+"Bahrain": {
+"aliases": [],
+"area": "a32",
+"lat": 26.03,
+"lon": 50.53,
+"prefix": "A9"
+},
+"Baker & Howland Islands": {
+"aliases": [],
+"area": null,
+"lat": 0.0,
+"lon": -176.0,
+"prefix": "KH1"
+},
+"Balearic Islands": {
+"aliases": [],
+"area": "a84",
+"lat": 39.6,
+"lon": 2.95,
+"prefix": "EA6"
+},
+"Banaba Island": {
+"aliases": [
+"Banaba"
+],
+"area": "a151",
+"lat": -0.88,
+"lon": 169.53,
+"prefix": "T33"
+},
+"Bangladesh": {
+"aliases": [],
+"area": "a29",
+"lat": 24.12,
+"lon": 89.65,
+"prefix": "S2"
+},
+"Barbados": {
+"aliases": [],
+"area": "a41",
+"lat": 13.18,
+"lon": -59.53,
+"prefix": "8P"
+},
+"Belarus": {
+"aliases": [],
+"area": "a36",
+"lat": 54.0,
+"lon": 28.0,
+"prefix": "EU"
+},
+"Belgium": {
+"aliases": [],
+"area": "a45",
+"lat": 50.7,
+"lon": 4.85,
+"prefix": "ON"
+},
+"Belize": {
+"aliases": [],
+"area": "a37",
+"lat": 16.97,
+"lon": -88.67,
+"prefix": "V3"
+},
+"Benin": {
+"aliases": [],
+"area": "a26",
+"lat": 9.87,
+"lon": 2.25,
+"prefix": "TY"
+},
+"Bermuda": {
+"aliases": [],
+"area": "a38",
+"lat": 32.32,
+"lon": -64.73,
+"prefix": "VP9"
+},
+"Bhutan": {
+"aliases": [],
+"area": "a43",
+"lat": 27.4,
+"lon": 90.18,
+"prefix": "A5"
+},
+"Bolivia": {
+"aliases": [],
+"area": "a39",
+"lat": -17.0,
+"lon": -65.0,
+"prefix": "CP"
+},
+"Bonaire": {
+"aliases": [],
+"area": "a203",
+"lat": 12.2,
+"lon": -68.25,
+"prefix": "PJ4"
+},
+"Bosnia-Herzegovina": {
+"aliases": [],
+"area": "a31",
+"lat": 44.32,
+"lon": 17.57,
+"prefix": "E7"
+},
+"Botswana": {
+"aliases": [],
+"area": "a44",
+"lat": -22.0,
+"lon": 24.0,
+"prefix": "A2"
+},
+"Bouvet": {
+"aliases": [],
+"area": null,
+"lat": -54.42,
+"lon": 3.38,
+"prefix": "3Y/b"
+},
+"Brazil": {
+"aliases": [],
+"area": "a40",
+"lat": -10.0,
+"lon": -53.0,
+"prefix": "PY"
+},
+"British Virgin Islands": {
+"aliases": [
+"British Virgin Is."
+],
+"area": "a293",
+"lat": 18.33,
+"lon": -64.75,
+"prefix": "VP2V"
+},
+"Brunei Darussalam": {
+"aliases": [],
+"area": "a42",
+"lat": 4.5,
+"lon": 114.6,
+"prefix": "V8"
+},
+"Bulgaria": {
+"aliases": [],
+"area": "a30",
+"lat": 42.83,
+"lon": 25.08,
+"prefix": "LZ"
+},
+"Burkina Faso": {
+"aliases": [],
+"area": "a27",
+"lat": 12.0,
+"lon": -2.0,
+"prefix": "XT"
+},
+"Burundi": {
+"aliases": [],
+"area": "a25",
+"lat": -3.17,
+"lon": 29.78,
+"prefix": "9U"
+},
+"Cambodia": {
+"aliases": [],
+"area": "a150",
+"lat": 12.93,
+"lon": 105.13,
+"prefix": "XU"
+},
+"Cameroon": {
+"aliases": [],
+"area": "a56",
+"lat": 5.38,
+"lon": 11.87,
+"prefix": "TJ"
+},
+"Canada": {
+"aliases": [],
+"area": "a47",
+"lat": 44.35,
+"lon": -78.75,
+"prefix": "VE"
+},
+"Canary Islands": {
+"aliases": [],
+"area": "a83",
+"lat": 28.32,
+"lon": -15.85,
+"prefix": "EA8"
+},
+"Cape Verde": {
+"aliases": [],
+"area": null,
+"lat": 16.0,
+"lon": -24.0,
+"prefix": "D4"
+},
+"Cayman Islands": {
+"aliases": [],
+"area": "a67",
+"lat": 19.32,
+"lon": -81.22,
+"prefix": "ZF"
+},
+"Central African Republic": {
+"aliases": [],
+"area": "a46",
+"lat": 6.75,
+"lon": 20.33,
+"prefix": "TL"
+},
+"Central Kiribati": {
+"aliases": [
+"Phoenix Islands"
+],
+"area": "a151",
+"lat": -2.83,
+"lon": -171.72,
+"prefix": "T31"
+},
+"Ceuta & Melilla": {
+"aliases": [],
+"area": "a171",
+"lat": 35.9,
+"lon": -5.27,
+"prefix": "EA9"
+},
+"Chad": {
+"aliases": [],
+"area": "a267",
+"lat": 15.8,
+"lon": 18.17,
+"prefix": "TT"
+},
+"Chagos Islands": {
+"aliases": [],
+"area": "a125",
+"lat": -7.32,
+"lon": 72.42,
+"prefix": "VQ9"
+},
+"Chatham Islands": {
+"aliases": [],
+"area": "a209",
+"lat": -43.85,
+"lon": -176.48,
+"prefix": "ZL7"
+},
+"Chesterfield Islands": {
+"aliases": [],
+"area": null,
+"lat": -19.87,
+"lon": 158.32,
+"prefix": "FK/c"
+},
+"Chile": {
+"aliases": [],
+"area": "a52",
+"lat": -30.0,
+"lon": -71.0,
+"prefix": "CE"
+},
+"China": {
+"aliases": [],
+"area": "a51",
+"lat": 36.0,
+"lon": 102.0,
+"prefix": "BY"
+},
+"Christmas Island": {
+"aliases": [],
+"area": "a66",
+"lat": -10.48,
+"lon": 105.63,
+"prefix": "VK9X"
+},
+"Clipperton Island": {
+"aliases": [],
+"area": null,
+"lat": 10.28,
+"lon": -109.22,
+"prefix": "FO/c"
+},
+"Cocos (Keeling) Islands": {
+"aliases": [],
+"area": "a48",
+"lat": -12.15,
+"lon": 96.82,
+"prefix": "VK9C"
+},
+"Cocos Island": {
+"aliases": [],
+"area": null,
+"lat": 5.52,
+"lon": -87.05,
+"prefix": "TI9"
+},
+"Colombia": {
+"aliases": [],
+"area": "a60",
+"lat": 5.0,
+"lon": -74.0,
+"prefix": "HK"
+},
+"Comoros": {
+"aliases": [],
+"area": "a61",
+"lat": -11.63,
+"lon": 43.3,
+"prefix": "D6"
+},
+"Conway Reef": {
+"aliases": [],
+"area": "a89",
+"lat": -22.0,
+"lon": 175.0,
+"prefix": "3D2/c"
+},
+"Corsica": {
+"aliases": [],
+"area": "a93",
+"lat": 42.0,
+"lon": 9.0,
+"prefix": "TK"
+},
+"Costa Rica": {
+"aliases": [],
+"area": "a63",
+"lat": 10.0,
+"lon": -84.0,
+"prefix": "TI"
+},
+"Cote d'Ivoire": {
+"aliases": [
+"C\u00f4te d'Ivoire"
+],
+"area": "a55",
+"lat": 7.58,
+"lon": -5.8,
+"prefix": "TU"
+},
+"Crete": {
+"aliases": [],
+"area": "a106",
+"lat": 35.23,
+"lon": 24.78,
+"prefix": "SV9"
+},
+"Croatia": {
+"aliases": [],
+"area": "a116",
+"lat": 45.18,
+"lon": 15.3,
+"prefix": "9A"
+},
+"Crozet Island": {
+"aliases": [],
+"area": "a15",
+"lat": -46.42,
+"lon": 51.75,
+"prefix": "FT/w"
+},
+"Cuba": {
+"aliases": [],
+"area": "a64",
+"lat": 21.5,
+"lon": -80.0,
+"prefix": "CM"
+},
+"Curacao": {
+"aliases": [
+"Cura\u00e7ao"
+],
+"area": "a65",
+"lat": 12.17,
+"lon": -69.0,
+"prefix": "PJ2"
+},
+"Cyprus": {
+"aliases": [],
+"area": "a69",
+"lat": 35.0,
+"lon": 33.0,
+"prefix": "5B"
+},
+"Czech Republic": {
+"aliases": [],
+"area": "a70",
+"lat": 50.0,
+"lon": 16.0,
+"prefix": "OK"
+},
+"DPR of Korea": {
+"aliases": [
+"Democratic People's Republic of Korea"
+],
+"area": "a225",
+"lat": 39.78,
+"lon": 126.3,
+"prefix": "P5"
+},
+"Dem. Rep. of the Congo": {
+"aliases": [
+"Democratic Republic of the Congo"
+],
+"area": "a57",
+"lat": -3.12,
+"lon": 23.03,
+"prefix": "9Q"
+},
+"Denmark": {
+"aliases": [],
+"area": "a75",
+"lat": 56.0,
+"lon": 10.0,
+"prefix": "OZ"
+},
+"Desecheo Island": {
+"aliases": [],
+"area": "a224",
+"lat": 18.08,
+"lon": -67.88,
+"prefix": "KP5"
+},
+"Djibouti": {
+"aliases": [],
+"area": "a72",
+"lat": 11.75,
+"lon": 42.35,
+"prefix": "J2"
+},
+"Dodecanese": {
+"aliases": [],
+"area": "a106",
+"lat": 36.17,
+"lon": 27.93,
+"prefix": "SV5"
+},
+"Dominica": {
+"aliases": [],
+"area": "a73",
+"lat": 15.43,
+"lon": -61.35,
+"prefix": "J7"
+},
+"Dominican Republic": {
+"aliases": [],
+"area": "a76",
+"lat": 19.13,
+"lon": -70.68,
+"prefix": "HI"
+},
+"Ducie Island": {
+"aliases": [],
+"area": null,
+"lat": -24.7,
+"lon": -124.8,
+"prefix": "VP6/d"
+},
+"East Malaysia": {
+"aliases": [],
+"area": "a191",
+"lat": 2.68,
+"lon": 113.32,
+"prefix": "9M6"
+},
+"Easter Island": {
+"aliases": [],
+"area": "a53",
+"lat": -27.1,
+"lon": -109.37,
+"prefix": "CE0Y"
+},
+"Eastern Kiribati": {
+"aliases": [
+"Line Islands"
+],
+"area": "a151",
+"lat": 1.8,
+"lon": -157.35,
+"prefix": "T32"
+},
+"Ecuador": {
+"aliases": [],
+"area": "a78",
+"lat": -1.4,
+"lon": -78.4,
+"prefix": "HC"
+},
+"Egypt": {
+"aliases": [],
+"area": "a80",
+"lat": 26.28,
+"lon": 28.6,
+"prefix": "SU"
+},
+"El Salvador": {
+"aliases": [],
+"area": "a249",
+"lat": 14.0,
+"lon": -89.0,
+"prefix": "YS"
+},
+"England": {
+"aliases": [],
+"area": "a81",
+"lat": 52.77,
+"lon": -1.47,
+"prefix": "G"
+},
+"Equatorial Guinea": {
+"aliases": [],
+"area": "a105",
+"lat": 1.7,
+"lon": 10.33,
+"prefix": "3C"
+},
+"Eritrea": {
+"aliases": [],
+"area": "a82",
+"lat": 15.0,
+"lon": 39.0,
+"prefix": "E3"
+},
+"Estonia": {
+"aliases": [],
+"area": "a85",
+"lat": 59.0,
+"lon": 25.0,
+"prefix": "ES"
+},
+"Ethiopia": {
+"aliases": [],
+"area": "a87",
+"lat": 9.0,
+"lon": 39.0,
+"prefix": "ET"
+},
+"European Russia": {
+"aliases": [],
+"area": "a234",
+"lat": 53.65,
+"lon": 41.37,
+"prefix": "UA"
+},
+"Falkland Islands": {
+"aliases": [],
+"area": "a90",
+"lat": -51.63,
+"lon": -58.72,
+"prefix": "VP8"
+},
+"Faroe Islands": {
+"aliases": [],
+"area": "a91",
+"lat": 62.07,
+"lon": -6.93,
+"prefix": "OY"
+},
+"Fed. Rep. of Germany": {
+"aliases": [
+"Germany"
+],
+"area": "a71",
+"lat": 51.0,
+"lon": 10.0,
+"prefix": "DL"
+},
+"Fernando de Noronha": {
+"aliases": [],
+"area": null,
+"lat": -3.85,
+"lon": -32.43,
+"prefix": "PY0F"
+},
+"Fiji": {
+"aliases": [],
+"area": "a89",
+"lat": -17.78,
+"lon": 177.92,
+"prefix": "3D2"
+},
+"Finland": {
+"aliases": [],
+"area": "a88",
+"lat": 63.78,
+"lon": 27.08,
+"prefix": "OH"
+},
+"France": {
+"aliases": [],
+"area": "a94",
+"lat": 46.0,
+"lon": 2.0,
+"prefix": "F"
+},
+"Franz Josef Land": {
+"aliases": [],
+"area": "a234",
+"lat": 80.68,
+"lon": 49.92,
+"prefix": "R1FJ"
+},
+"French Guiana": {
+"aliases": [],
+"area": "a110",
+"lat": 4.0,
+"lon": -53.0,
+"prefix": "FY"
+},
+"French Polynesia": {
+"aliases": [],
+"area": "a228",
+"lat": -17.65,
+"lon": -149.4,
+"prefix": "FO"
+},
+"Gabon": {
+"aliases": [],
+"area": "a95",
+"lat": -0.37,
+"lon": 11.73,
+"prefix": "TR"
+},
+"Galapagos Islands": {
+"aliases": [],
+"area": "a79",
+"lat": -0.78,
+"lon": -91.03,
+"prefix": "HC8"
+},
+"Georgia": {
+"aliases": [],
+"area": "a97",
+"lat": 42.0,
+"lon": 45.0,
+"prefix": "4L"
+},
+"Ghana": {
+"aliases": [],
+"area": "a99",
+"lat": 7.7,
+"lon": -1.57,
+"prefix": "9G"
+},
+"Gibraltar": {
+"aliases": [],
+"area": "a86",
+"lat": 36.15,
+"lon": -5.37,
+"prefix": "ZB"
+},
+"Glorioso Islands": {
+"aliases": [],
+"area": null,
+"lat": -11.55,
+"lon": 47.28,
+"prefix": "FT/g"
+},
+"Greece": {
+"aliases": [],
+"area": "a106",
+"lat": 39.78,
+"lon": 21.78,
+"prefix": "SV"
+},
+"Greenland": {
+"aliases": [],
+"area": "a108",
+"lat": 74.0,
+"lon": -42.78,
+"prefix": "OX"
+},
+"Grenada": {
+"aliases": [],
+"area": "a107",
+"lat": 12.13,
+"lon": -61.68,
+"prefix": "J3"
+},
+"Guadeloupe": {
+"aliases": [],
+"area": "a101",
+"lat": 16.13,
+"lon": -61.67,
+"prefix": "FG"
+},
+"Guam": {
+"aliases": [],
+"area": "a111",
+"lat": 13.37,
+"lon": 144.7,
+"prefix": "KH2"
+},
+"Guantanamo Bay": {
+"aliases": [],
+"area": "a64",
+"lat": 20.0,
+"lon": -75.0,
+"prefix": "KG4"
+},
+"Guatemala": {
+"aliases": [],
+"area": "a109",
+"lat": 15.5,
+"lon": -90.3,
+"prefix": "TG"
+},
+"Guernsey": {
+"aliases": [],
+"area": "a98",
+"lat": 49.45,
+"lon": -2.58,
+"prefix": "GU"
+},
+"Guinea": {
+"aliases": [],
+"area": "a100",
+"lat": 11.0,
+"lon": -10.68,
+"prefix": "3X"
+},
+"Guinea-Bissau": {
+"aliases": [],
+"area": "a103",
+"lat": 12.02,
+"lon": -14.8,
+"prefix": "J5"
+},
+"Guyana": {
+"aliases": [],
+"area": "a112",
+"lat": 6.02,
+"lon": -59.45,
+"prefix": "8R"
+},
+"Haiti": {
+"aliases": [],
+"area": "a117",
+"lat": 19.02,
+"lon": -72.18,
+"prefix": "HH"
+},
+"Hawaii": {
+"aliases": [],
+"area": "a287",
+"lat": 21.12,
+"lon": -157.48,
+"prefix": "KH6"
+},
+"Heard Island": {
+"aliases": [],
+"area": "a114",
+"lat": -53.08,
+"lon": 73.5,
+"prefix": "VK0H"
+},
+"Honduras": {
+"aliases": [],
+"area": "a115",
+"lat": 15.0,
+"lon": -87.0,
+"prefix": "HR"
+},
+"Hong Kong": {
+"aliases": [],
+"area": "a113",
+"lat": 22.28,
+"lon": 114.18,
+"prefix": "VR"
+},
+"Hungary": {
+"aliases": [],
+"area": "a118",
+"lat": 47.12,
+"lon": 19.28,
+"prefix": "HA"
+},
+"ITU HQ": {
+"aliases": [],
+"area": "a49",
+"lat": 46.17,
+"lon": 6.05,
+"prefix": "4U1I"
+},
+"Iceland": {
+"aliases": [],
+"area": "a129",
+"lat": 64.8,
+"lon": -18.73,
+"prefix": "TF"
+},
+"India": {
+"aliases": [],
+"area": "a124",
+"lat": 22.5,
+"lon": 77.58,
+"prefix": "VU"
+},
+"Indonesia": {
+"aliases": [],
+"area": "a119",
+"lat": -7.3,
+"lon": 109.88,
+"prefix": "YB"
+},
+"Iran": {
+"aliases": [],
+"area": "a127",
+"lat": 32.0,
+"lon": 53.0,
+"prefix": "EP"
+},
+"Iraq": {
+"aliases": [],
+"area": "a128",
+"lat": 33.92,
+"lon": 42.78,
+"prefix": "YI"
+},
+"Ireland": {
+"aliases": [],
+"area": "a126",
+"lat": 53.13,
+"lon": -8.02,
+"prefix": "EI"
+},
+"Isle of Man": {
+"aliases": [],
+"area": "a120",
+"lat": 54.2,
+"lon": -4.53,
+"prefix": "GD"
+},
+"Israel": {
+"aliases": [],
+"area": "a130",
+"lat": 31.32,
+"lon": 34.82,
+"prefix": "4X"
+},
+"Italy": {
+"aliases": [],
+"area": "a133",
+"lat": 42.82,
+"lon": 12.58,
+"prefix": "I"
+},
+"Jamaica": {
+"aliases": [],
+"area": "a135",
+"lat": 18.2,
+"lon": -77.47,
+"prefix": "6Y"
+},
+"Jan Mayen": {
+"aliases": [],
+"area": "a201",
+"lat": 71.05,
+"lon": -8.28,
+"prefix": "JX"
+},
+"Japan": {
+"aliases": [],
+"area": "a142",
+"lat": 36.4,
+"lon": 138.38,
+"prefix": "JA"
+},
+"Jersey": {
+"aliases": [],
+"area": "a136",
+"lat": 49.22,
+"lon": -2.18,
+"prefix": "GJ"
+},
+"Johnston Island": {
+"aliases": [],
+"area": null,
+"lat": 16.72,
+"lon": -169.53,
+"prefix": "KH3"
+},
+"Jordan": {
+"aliases": [],
+"area": "a137",
+"lat": 31.18,
+"lon": 36.42,
+"prefix": "JY"
+},
+"Juan Fernandez Islands": {
+"aliases": [],
+"area": "a54",
+"lat": -33.6,
+"lon": -78.85,
+"prefix": "CE0Z"
+},
+"Juan de Nova, Europa": {
+"aliases": [],
+"area": null,
+"lat": -17.05,
+"lon": 42.72,
+"prefix": "FT/j"
+},
+"Kaliningrad": {
+"aliases": [],
+"area": "a235",
+"lat": 54.72,
+"lon": 20.52,
+"prefix": "UA2"
+},
+"Kazakhstan": {
+"aliases": [],
+"area": "a147",
+"lat": 48.17,
+"lon": 65.18,
+"prefix": "UN"
+},
+"Kenya": {
+"aliases": [],
+"area": "a148",
+"lat": 0.32,
+"lon": 38.15,
+"prefix": "5Z"
+},
+"Kerguelen Islands": {
+"aliases": [],
+"area": "a15",
+"lat": -49.0,
+"lon": 69.27,
+"prefix": "FT/x"
+},
+"Kermadec Islands": {
+"aliases": [],
+"area": null,
+"lat": -29.25,
+"lon": -177.92,
+"prefix": "ZL8"
+},
+"Kingdom of eSwatini": {
+"aliases": [
+"Eswatini"
+],
+"area": "a262",
+"lat": -26.65,
+"lon": 31.48,
+"prefix": "3DA"
+},
+"Kure Island": {
+"aliases": [],
+"area": null,
+"lat": 29.0,
+"lon": -178.0,
+"prefix": "KH7K"
+},
+"Kuwait": {
+"aliases": [],
+"area": "a157",
+"lat": 29.38,
+"lon": 47.38,
+"prefix": "9K"
+},
+"Kyrgyzstan": {
+"aliases": [],
+"area": "a149",
+"lat": 41.7,
+"lon": 74.13,
+"prefix": "EX"
+},
+"Lakshadweep Islands": {
+"aliases": [],
+"area": "a122",
+"lat": 11.23,
+"lon": 72.78,
+"prefix": "VU7"
+},
+"Laos": {
+"aliases": [],
+"area": "a158",
+"lat": 18.2,
+"lon": 104.55,
+"prefix": "XW"
+},
+"Latvia": {
+"aliases": [],
+"area": "a168",
+"lat": 57.03,
+"lon": 24.65,
+"prefix": "YL"
+},
+"Lebanon": {
+"aliases": [],
+"area": "a159",
+"lat": 33.83,
+"lon": 35.83,
+"prefix": "OD"
+},
+"Lesotho": {
+"aliases": [],
+"area": "a165",
+"lat": -29.22,
+"lon": 27.88,
+"prefix": "7P"
+},
+"Liberia": {
+"aliases": [],
+"area": "a160",
+"lat": 6.5,
+"lon": -9.5,
+"prefix": "EL"
+},
+"Libya": {
+"aliases": [],
+"area": "a161",
+"lat": 27.2,
+"lon": 16.6,
+"prefix": "5A"
+},
+"Liechtenstein": {
+"aliases": [],
+"area": "a163",
+"lat": 47.13,
+"lon": 9.57,
+"prefix": "HB0"
+},
+"Lithuania": {
+"aliases": [],
+"area": "a166",
+"lat": 55.45,
+"lon": 23.63,
+"prefix": "LY"
+},
+"Lord Howe Island": {
+"aliases": [],
+"area": null,
+"lat": -31.55,
+"lon": 159.08,
+"prefix": "VK9L"
+},
+"Luxembourg": {
+"aliases": [],
+"area": "a167",
+"lat": 50.0,
+"lon": 6.0,
+"prefix": "LX"
+},
+"Macao": {
+"aliases": [],
+"area": "a51",
+"lat": 22.1,
+"lon": 113.5,
+"prefix": "XX9"
+},
+"Macquarie Island": {
+"aliases": [],
+"area": "a19",
+"lat": -54.6,
+"lon": 158.88,
+"prefix": "VK0M"
+},
+"Madagascar": {
+"aliases": [],
+"area": "a174",
+"lat": -19.0,
+"lon": 46.58,
+"prefix": "5R"
+},
+"Madeira Islands": {
+"aliases": [],
+"area": "a220",
+"lat": 32.75,
+"lon": -16.95,
+"prefix": "CT3"
+},
+"Malawi": {
+"aliases": [],
+"area": "a190",
+"lat": -14.0,
+"lon": 34.0,
+"prefix": "7Q"
+},
+"Maldives": {
+"aliases": [],
+"area": "a175",
+"lat": 4.15,
+"lon": 73.45,
+"prefix": "8Q"
+},
+"Mali": {
+"aliases": [],
+"area": "a179",
+"lat": 18.0,
+"lon": -2.58,
+"prefix": "TZ"
+},
+"Malpelo Island": {
+"aliases": [],
+"area": null,
+"lat": 3.98,
+"lon": -81.58,
+"prefix": "HK0/m"
+},
+"Malta": {
+"aliases": [],
+"area": "a180",
+"lat": 35.88,
+"lon": 14.42,
+"prefix": "9H"
+},
+"Mariana Islands": {
+"aliases": [],
+"area": "a184",
+"lat": 15.18,
+"lon": 145.72,
+"prefix": "KH0"
+},
+"Market Reef": {
+"aliases": [
+"M\u00e4rket Island"
+],
+"area": "a261",
+"lat": 60.0,
+"lon": 19.0,
+"prefix": "OJ0"
+},
+"Marquesas Islands": {
+"aliases": [],
+"area": "a228",
+"lat": -8.92,
+"lon": -140.07,
+"prefix": "FO/m"
+},
+"Marshall Islands": {
+"aliases": [],
+"area": "a177",
+"lat": 9.08,
+"lon": 167.33,
+"prefix": "V7"
+},
+"Martinique": {
+"aliases": [],
+"area": "a188",
+"lat": 14.7,
+"lon": -61.03,
+"prefix": "FM"
+},
+"Mauritania": {
+"aliases": [],
+"area": "a186",
+"lat": 20.6,
+"lon": -10.5,
+"prefix": "5T"
+},
+"Mauritius": {
+"aliases": [],
+"area": "a189",
+"lat": -20.35,
+"lon": 57.5,
+"prefix": "3B8"
+},
+"Mayotte": {
+"aliases": [],
+"area": "a192",
+"lat": -12.88,
+"lon": 45.15,
+"prefix": "FH"
+},
+"Mellish Reef": {
+"aliases": [],
+"area": null,
+"lat": -17.4,
+"lon": 155.85,
+"prefix": "VK9M"
+},
+"Mexico": {
+"aliases": [],
+"area": "a176",
+"lat": 21.32,
+"lon": -100.23,
+"prefix": "XE"
+},
+"Micronesia": {
+"aliases": [],
+"area": "a92",
+"lat": 6.88,
+"lon": 158.2,
+"prefix": "V6"
+},
+"Midway Island": {
+"aliases": [],
+"area": null,
+"lat": 28.2,
+"lon": -177.37,
+"prefix": "KH4"
+},
+"Minami Torishima": {
+"aliases": [],
+"area": null,
+"lat": 24.28,
+"lon": 153.97,
+"prefix": "JD/m"
+},
+"Moldova": {
+"aliases": [],
+"area": "a173",
+"lat": 47.0,
+"lon": 29.0,
+"prefix": "ER"
+},
+"Monaco": {
+"aliases": [],
+"area": "a172",
+"lat": 43.73,
+"lon": 7.4,
+"prefix": "3A"
+},
+"Mongolia": {
+"aliases": [],
+"area": "a183",
+"lat": 46.77,
+"lon": 102.17,
+"prefix": "JT"
+},
+"Montenegro": {
+"aliases": [],
+"area": "a182",
+"lat": 42.5,
+"lon": 19.28,
+"prefix": "4O"
+},
+"Montserrat": {
+"aliases": [],
+"area": "a187",
+"lat": 16.75,
+"lon": -62.18,
+"prefix": "VP2M"
+},
+"Morocco": {
+"aliases": [],
+"area": "a171",
+"lat": 32.0,
+"lon": -5.0,
+"prefix": "CN"
+},
+"Mount Athos": {
+"aliases": [],
+"area": "a106",
+"lat": 40.0,
+"lon": 24.0,
+"prefix": "SV/a"
+},
+"Mozambique": {
+"aliases": [],
+"area": "a185",
+"lat": -18.25,
+"lon": 35.0,
+"prefix": "C9"
+},
+"Myanmar": {
+"aliases": [],
+"area": "a181",
+"lat": 20.0,
+"lon": 96.37,
+"prefix": "XZ"
+},
+"N.Z. Subantarctic Is.": {
+"aliases": [],
+"area": "a208",
+"lat": -51.62,
+"lon": 167.62,
+"prefix": "ZL9"
+},
+"Namibia": {
+"aliases": [],
+"area": "a193",
+"lat": -22.0,
+"lon": 17.0,
+"prefix": "V5"
+},
+"Nauru": {
+"aliases": [],
+"area": "a206",
+"lat": -0.52,
+"lon": 166.92,
+"prefix": "C2"
+},
+"Navassa Island": {
+"aliases": [],
+"area": "a117",
+"lat": 18.4,
+"lon": -75.0,
+"prefix": "KP1"
+},
+"Nepal": {
+"aliases": [],
+"area": "a205",
+"lat": 27.7,
+"lon": 85.33,
+"prefix": "9N"
+},
+"Netherlands": {
+"aliases": [],
+"area": "a202",
+"lat": 52.28,
+"lon": 5.47,
+"prefix": "PA"
+},
+"New Caledonia": {
+"aliases": [],
+"area": "a194",
+"lat": -21.5,
+"lon": 165.5,
+"prefix": "FK"
+},
+"New Zealand": {
+"aliases": [],
+"area": "a210",
+"lat": -39.03,
+"lon": 174.47,
+"prefix": "ZL"
+},
+"Nicaragua": {
+"aliases": [],
+"area": "a198",
+"lat": 12.88,
+"lon": -85.05,
+"prefix": "YN"
+},
+"Niger": {
+"aliases": [],
+"area": "a195",
+"lat": 17.63,
+"lon": 9.43,
+"prefix": "5U"
+},
+"Nigeria": {
+"aliases": [],
+"area": "a197",
+"lat": 9.87,
+"lon": 7.55,
+"prefix": "5N"
+},
+"Niue": {
+"aliases": [],
+"area": "a200",
+"lat": -19.03,
+"lon": -169.85,
+"prefix": "E6"
+},
+"Norfolk Island": {
+"aliases": [],
+"area": "a196",
+"lat": -29.03,
+"lon": 167.93,
+"prefix": "VK9N"
+},
+"North Cook Islands": {
+"aliases": [],
+"area": null,
+"lat": -10.02,
+"lon": -161.08,
+"prefix": "E5/n"
+},
+"North Macedonia": {
+"aliases": [],
+"area": "a178",
+"lat": 41.6,
+"lon": 21.65,
+"prefix": "Z3"
+},
+"Northern Ireland": {
+"aliases": [],
+"area": "a199",
+"lat": 54.73,
+"lon": -6.68,
+"prefix": "GI"
+},
+"Norway": {
+"aliases": [],
+"area": "a204",
+"lat": 61.0,
+"lon": 9.0,
+"prefix": "LA"
+},
+"Ogasawara": {
+"aliases": [],
+"area": "a138",
+"lat": 27.05,
+"lon": 142.2,
+"prefix": "JD/o"
+},
+"Oman": {
+"aliases": [],
+"area": "a212",
+"lat": 23.6,
+"lon": 58.55,
+"prefix": "A4"
+},
+"Pakistan": {
+"aliases": [],
+"area": "a213",
+"lat": 30.0,
+"lon": 70.0,
+"prefix": "AP"
+},
+"Palau": {
+"aliases": [],
+"area": "a219",
+"lat": 7.45,
+"lon": 134.53,
+"prefix": "T8"
+},
+"Palestine": {
+"aliases": [],
+"area": "a96",
+"lat": 31.28,
+"lon": 34.27,
+"prefix": "E4"
+},
+"Palmyra & Jarvis Islands": {
+"aliases": [],
+"area": null,
+"lat": 5.87,
+"lon": -162.07,
+"prefix": "KH5"
+},
+"Panama": {
+"aliases": [],
+"area": "a214",
+"lat": 9.0,
+"lon": -80.0,
+"prefix": "HP"
+},
+"Papua New Guinea": {
+"aliases": [],
+"area": "a222",
+"lat": -9.5,
+"lon": 147.12,
+"prefix": "P2"
+},
+"Paraguay": {
+"aliases": [],
+"area": "a227",
+"lat": -25.27,
+"lon": -57.67,
+"prefix": "ZP"
+},
+"Peru": {
+"aliases": [],
+"area": "a217",
+"lat": -10.0,
+"lon": -76.0,
+"prefix": "OA"
+},
+"Peter 1 Island": {
+"aliases": [],
+"area": "a16",
+"lat": -68.77,
+"lon": -90.58,
+"prefix": "3Y/p"
+},
+"Philippines": {
+"aliases": [],
+"area": "a218",
+"lat": 13.0,
+"lon": 122.0,
+"prefix": "DU"
+},
+"Pitcairn Island": {
+"aliases": [],
+"area": "a216",
+"lat": -25.07,
+"lon": -130.1,
+"prefix": "VP6"
+},
+"Poland": {
+"aliases": [],
+"area": "a223",
+"lat": 52.28,
+"lon": 18.67,
+"prefix": "SP"
+},
+"Portugal": {
+"aliases": [],
+"area": "a226",
+"lat": 39.5,
+"lon": -8.0,
+"prefix": "CT"
+},
+"Pr. Edward & Marion Is.": {
+"aliases": [],
+"area": "a303",
+"lat": -46.88,
+"lon": 37.72,
+"prefix": "ZS8"
+},
+"Pratas Island": {
+"aliases": [],
+"area": null,
+"lat": 20.7,
+"lon": 116.7,
+"prefix": "BV9P"
+},
+"Puerto Rico": {
+"aliases": [],
+"area": "a224",
+"lat": 18.18,
+"lon": -66.55,
+"prefix": "KP4"
+},
+"Qatar": {
+"aliases": [],
+"area": "a229",
+"lat": 25.25,
+"lon": 51.13,
+"prefix": "A7"
+},
+"Republic of Korea": {
+"aliases": [
+"South Korea"
+],
+"area": "a154",
+"lat": 36.23,
+"lon": 127.9,
+"prefix": "HL"
+},
+"Republic of Kosovo": {
+"aliases": [
+"Kosovo"
+],
+"area": "a155",
+"lat": 42.67,
+"lon": 21.17,
+"prefix": "Z6"
+},
+"Republic of South Sudan": {
+"aliases": [
+"South Sudan"
+],
+"area": "a241",
+"lat": 4.85,
+"lon": 31.6,
+"prefix": "Z8"
+},
+"Republic of the Congo": {
+"aliases": [],
+"area": "a58",
+"lat": -1.02,
+"lon": 15.37,
+"prefix": "TN"
+},
+"Reunion Island": {
+"aliases": [],
+"area": "a230",
+"lat": -21.12,
+"lon": 55.48,
+"prefix": "FR"
+},
+"Revillagigedo": {
+"aliases": [],
+"area": "a176",
+"lat": 18.77,
+"lon": -110.97,
+"prefix": "XF4"
+},
+"Rodriguez Island": {
+"aliases": [
+"Rodrigues Island"
+],
+"area": null,
+"lat": -19.7,
+"lon": 63.42,
+"prefix": "3B9"
+},
+"Romania": {
+"aliases": [],
+"area": "a231",
+"lat": 45.78,
+"lon": 24.7,
+"prefix": "YO"
+},
+"Rotuma Island": {
+"aliases": [],
+"area": "a89",
+"lat": -12.48,
+"lon": 177.08,
+"prefix": "3D2/r"
+},
+"Rwanda": {
+"aliases": [],
+"area": "a236",
+"lat": -1.75,
+"lon": 29.82,
+"prefix": "9X"
+},
+"Saba & St. Eustatius": {
+"aliases": [
+"Saba and Sint Eustatius"
+],
+"area": "a203",
+"lat": 17.57,
+"lon": -63.1,
+"prefix": "PJ5"
+},
+"Sable Island": {
+"aliases": [],
+"area": "a47",
+"lat": 43.93,
+"lon": -59.9,
+"prefix": "CY0"
+},
+"Samoa": {
+"aliases": [],
+"area": "a300",
+"lat": -13.93,
+"lon": -171.7,
+"prefix": "5W"
+},
+"San Andres & Providencia": {
+"aliases": [],
+"area": null,
+"lat": 12.55,
+"lon": -81.72,
+"prefix": "HK0/a"
+},
+"San Felix & San Ambrosio": {
+"aliases": [],
+"area": null,
+"lat": -26.28,
+"lon": -80.07,
+"prefix": "CE0X"
+},
+"San Marino": {
+"aliases": [],
+"area": "a250",
+"lat": 43.95,
+"lon": 12.45,
+"prefix": "T7"
+},
+"Sao Tome & Principe": {
+"aliases": [
+"Sao Tome and Principe"
+],
+"area": "a257",
+"lat": 0.22,
+"lon": 6.57,
+"prefix": "S9"
+},
+"Sardinia": {
+"aliases": [],
+"area": "a131",
+"lat": 40.15,
+"lon": 9.27,
+"prefix": "IS"
+},
+"Saudi Arabia": {
+"aliases": [],
+"area": "a238",
+"lat": 24.2,
+"lon": 43.83,
+"prefix": "HZ"
+},
+"Scarborough Reef": {
+"aliases": [],
+"area": null,
+"lat": 15.08,
+"lon": 117.72,
+"prefix": "BS7"
+},
+"Scotland": {
+"aliases": [],
+"area": "a239",
+"lat": 56.82,
+"lon": -4.18,
+"prefix": "GM"
+},
+"Senegal": {
+"aliases": [],
+"area": "a242",
+"lat": 15.2,
+"lon": -14.63,
+"prefix": "6W"
+},
+"Serbia": {
+"aliases": [],
+"area": "a254",
+"lat": 44.0,
+"lon": 21.0,
+"prefix": "YU"
+},
+"Seychelles": {
+"aliases": [],
+"area": "a264",
+"lat": -4.67,
+"lon": 55.47,
+"prefix": "S7"
+},
+"Sierra Leone": {
+"aliases": [],
+"area": "a248",
+"lat": 8.5,
+"lon": -13.25,
+"prefix": "9L"
+},
+"Singapore": {
+"aliases": [],
+"area": "a244",
+"lat": 1.37,
+"lon": 103.78,
+"prefix": "9V"
+},
+"Sint Maarten": {
+"aliases": [],
+"area": "a263",
+"lat": 18.07,
+"lon": -63.07,
+"prefix": "PJ7"
+},
+"Slovak Republic": {
+"aliases": [
+"Slovakia"
+],
+"area": "a259",
+"lat": 49.0,
+"lon": 20.0,
+"prefix": "OM"
+},
+"Slovenia": {
+"aliases": [],
+"area": "a260",
+"lat": 46.0,
+"lon": 14.0,
+"prefix": "S5"
+},
+"Solomon Islands": {
+"aliases": [],
+"area": "a247",
+"lat": -9.0,
+"lon": 160.0,
+"prefix": "H4"
+},
+"Somalia": {
+"aliases": [],
+"area": "a252",
+"lat": 2.03,
+"lon": 45.35,
+"prefix": "T5"
+},
+"South Africa": {
+"aliases": [],
+"area": "a304",
+"lat": -29.07,
+"lon": 22.63,
+"prefix": "ZS"
+},
+"South Cook Islands": {
+"aliases": [],
+"area": null,
+"lat": -21.9,
+"lon": -157.93,
+"prefix": "E5/s"
+},
+"South Georgia Island": {
+"aliases": [],
+"area": "a243",
+"lat": -54.48,
+"lon": -37.08,
+"prefix": "VP8/g"
+},
+"South Orkney Islands": {
+"aliases": [],
+"area": "a17",
+"lat": -60.6,
+"lon": -45.55,
+"prefix": "VP8/o"
+},
+"South Sandwich Islands": {
+"aliases": [],
+"area": "a245",
+"lat": -58.43,
+"lon": -26.33,
+"prefix": "VP8/s"
+},
+"South Shetland Islands": {
+"aliases": [],
+"area": "a13",
+"lat": -62.08,
+"lon": -58.67,
+"prefix": "VP8/h"
+},
+"Sov Mil Order of Malta": {
+"aliases": [
+"Sovereign Military Order of Malta"
+],
+"area": "a290",
+"lat": 41.9,
+"lon": 12.43,
+"prefix": "1A"
+},
+"Spain": {
+"aliases": [],
+"area": "a86",
+"lat": 40.37,
+"lon": -4.88,
+"prefix": "EA"
+},
+"Spratly Islands": {
+"aliases": [],
+"area": null,
+"lat": 9.88,
+"lon": 114.23,
+"prefix": "1S"
+},
+"Sri Lanka": {
+"aliases": [],
+"area": "a164",
+"lat": 7.6,
+"lon": 80.7,
+"prefix": "4S"
+},
+"St. Barthelemy": {
+"aliases": [],
+"area": "a35",
+"lat": 17.9,
+"lon": -62.83,
+"prefix": "FJ"
+},
+"St. Helena": {
+"aliases": [],
+"area": "a246",
+"lat": -15.97,
+"lon": -5.72,
+"prefix": "ZD7"
+},
+"St. Kitts & Nevis": {
+"aliases": [
+"Saint Kitts and Nevis"
+],
+"area": "a152",
+"lat": 17.37,
+"lon": -62.78,
+"prefix": "V4"
+},
+"St. Lucia": {
+"aliases": [
+"Saint Lucia"
+],
+"area": "a162",
+"lat": 13.87,
+"lon": -61.0,
+"prefix": "J6"
+},
+"St. Martin": {
+"aliases": [],
+"area": "a170",
+"lat": 18.08,
+"lon": -63.03,
+"prefix": "FS"
+},
+"St. Paul Island": {
+"aliases": [],
+"area": "a47",
+"lat": 47.0,
+"lon": -60.0,
+"prefix": "CY9"
+},
+"St. Peter & St. Paul": {
+"aliases": [],
+"area": null,
+"lat": 0.0,
+"lon": -29.0,
+"prefix": "PY0S"
+},
+"St. Pierre & Miquelon": {
+"aliases": [],
+"area": "a253",
+"lat": 46.77,
+"lon": -56.2,
+"prefix": "FP"
+},
+"St. Vincent": {
+"aliases": [
+"Saint Vincent and the Grenadines"
+],
+"area": "a291",
+"lat": 13.23,
+"lon": -61.2,
+"prefix": "J8"
+},
+"Sudan": {
+"aliases": [],
+"area": "a240",
+"lat": 14.47,
+"lon": 28.62,
+"prefix": "ST"
+},
+"Suriname": {
+"aliases": [],
+"area": "a258",
+"lat": 4.0,
+"lon": -56.0,
+"prefix": "PZ"
+},
+"Svalbard": {
+"aliases": [],
+"area": "a207",
+"lat": 78.0,
+"lon": 16.0,
+"prefix": "JW"
+},
+"Swains Island": {
+"aliases": [],
+"area": null,
+"lat": -11.05,
+"lon": -171.25,
+"prefix": "KH8/s"
+},
+"Sweden": {
+"aliases": [],
+"area": "a261",
+"lat": 61.2,
+"lon": 14.57,
+"prefix": "SM"
+},
+"Switzerland": {
+"aliases": [],
+"area": "a49",
+"lat": 46.87,
+"lon": 8.12,
+"prefix": "HB"
+},
+"Syria": {
+"aliases": [],
+"area": "a265",
+"lat": 35.38,
+"lon": 38.2,
+"prefix": "YK"
+},
+"Taiwan": {
+"aliases": [],
+"area": "a280",
+"lat": 23.72,
+"lon": 120.88,
+"prefix": "BV"
+},
+"Tajikistan": {
+"aliases": [],
+"area": "a270",
+"lat": 38.82,
+"lon": 71.22,
+"prefix": "EY"
+},
+"Tanzania": {
+"aliases": [],
+"area": "a281",
+"lat": -5.75,
+"lon": 33.92,
+"prefix": "5H"
+},
+"Temotu Province": {
+"aliases": [],
+"area": "a247",
+"lat": -10.72,
+"lon": 165.8,
+"prefix": "H40"
+},
+"Thailand": {
+"aliases": [],
+"area": "a269",
+"lat": 12.6,
+"lon": 99.7,
+"prefix": "HS"
+},
+"The Gambia": {
+"aliases": [],
+"area": "a102",
+"lat": 13.4,
+"lon": -16.38,
+"prefix": "C5"
+},
+"Timor - Leste": {
+"aliases": [
+"Timor-Leste"
+],
+"area": "a274",
+"lat": -8.8,
+"lon": 126.05,
+"prefix": "4W"
+},
+"Togo": {
+"aliases": [],
+"area": "a268",
+"lat": 8.4,
+"lon": 1.28,
+"prefix": "5V"
+},
+"Tokelau Islands": {
+"aliases": [
+"Tokelau"
+],
+"area": "a271",
+"lat": -9.4,
+"lon": -171.2,
+"prefix": "ZK3"
+},
+"Tonga": {
+"aliases": [],
+"area": "a275",
+"lat": -21.22,
+"lon": -175.13,
+"prefix": "A3"
+},
+"Trindade & Martim Vaz": {
+"aliases": [],
+"area": null,
+"lat": -20.5,
+"lon": -29.32,
+"prefix": "PY0T"
+},
+"Trinidad & Tobago": {
+"aliases": [
+"Trinidad and Tobago"
+],
+"area": "a276",
+"lat": 10.38,
+"lon": -61.28,
+"prefix": "9Y"
+},
+"Tristan da Cunha & Gough": {
+"aliases": [
+"Tristan da Cunha and Gough Islands"
+],
+"area": null,
+"lat": -37.13,
+"lon": -12.3,
+"prefix": "ZD9"
+},
+"Tromelin Island": {
+"aliases": [],
+"area": null,
+"lat": -15.88,
+"lon": 54.5,
+"prefix": "FT/t"
+},
+"Tunisia": {
+"aliases": [],
+"area": "a278",
+"lat": 35.4,
+"lon": 9.32,
+"prefix": "3V"
+},
+"Turkmenistan": {
+"aliases": [],
+"area": "a272",
+"lat": 38.0,
+"lon": 58.0,
+"prefix": "EZ"
+},
+"Turks & Caicos Islands": {
+"aliases": [
+"Turks and Caicos Islands"
+],
+"area": "a266",
+"lat": 21.77,
+"lon": -71.75,
+"prefix": "VP5"
+},
+"Tuvalu": {
+"aliases": [],
+"area": null,
+"lat": -8.5,
+"lon": 179.2,
+"prefix": "T2"
+},
+"UK Base Areas on Cyprus": {
+"aliases": [
+"Sovereign Base Areas of Akrotiri and Dhekelia"
+],
+"area": null,
+"lat": 35.32,
+"lon": 33.57,
+"prefix": "ZC4"
+},
+"US Virgin Islands": {
+"aliases": [],
+"area": "a294",
+"lat": 17.73,
+"lon": -64.8,
+"prefix": "KP2"
+},
+"Uganda": {
+"aliases": [],
+"area": "a283",
+"lat": 1.92,
+"lon": 32.6,
+"prefix": "5X"
+},
+"Ukraine": {
+"aliases": [],
+"area": "a284",
+"lat": 50.0,
+"lon": 30.0,
+"prefix": "UR"
+},
+"United Arab Emirates": {
+"aliases": [],
+"area": "a9",
+"lat": 24.0,
+"lon": 54.0,
+"prefix": "A6"
+},
+"United Nations HQ": {
+"aliases": [],
+"area": "a286",
+"lat": 40.75,
+"lon": -73.97,
+"prefix": "4U1U"
+},
+"United States": {
+"aliases": [
+"United States of America"
+],
+"area": "a286",
+"lat": 37.53,
+"lon": -91.67,
+"prefix": "K"
+},
+"Uruguay": {
+"aliases": [],
+"area": "a285",
+"lat": -33.0,
+"lon": -56.0,
+"prefix": "CX"
+},
+"Uzbekistan": {
+"aliases": [],
+"area": "a289",
+"lat": 41.4,
+"lon": 63.97,
+"prefix": "UK"
+},
+"Vanuatu": {
+"aliases": [],
+"area": "a296",
+"lat": -17.67,
+"lon": 168.38,
+"prefix": "YJ"
+},
+"Vatican City": {
+"aliases": [
+"Vatican"
+],
+"area": "a290",
+"lat": 41.9,
+"lon": 12.47,
+"prefix": "HV"
+},
+"Venezuela": {
+"aliases": [],
+"area": "a292",
+"lat": 8.0,
+"lon": -66.0,
+"prefix": "YV"
+},
+"Vietnam": {
+"aliases": [
+"Viet Nam"
+],
+"area": "a295",
+"lat": 15.8,
+"lon": 107.9,
+"prefix": "3W"
+},
+"Wake Island": {
+"aliases": [],
+"area": null,
+"lat": 19.28,
+"lon": 166.63,
+"prefix": "KH9"
+},
+"Wales": {
+"aliases": [],
+"area": "a299",
+"lat": 52.28,
+"lon": -3.73,
+"prefix": "GW"
+},
+"Wallis & Futuna Islands": {
+"aliases": [],
+"area": "a298",
+"lat": -13.3,
+"lon": -176.2,
+"prefix": "FW"
+},
+"West Malaysia": {
+"aliases": [],
+"area": "a191",
+"lat": 3.95,
+"lon": 102.23,
+"prefix": "9M2"
+},
+"Western Kiribati": {
+"aliases": [
+"Gilbert Islands"
+],
+"area": "a151",
+"lat": 1.42,
+"lon": 173.0,
+"prefix": "T30"
+},
+"Western Sahara": {
+"aliases": [],
+"area": "a237",
+"lat": 24.82,
+"lon": -13.85,
+"prefix": "S0"
+},
+"Willis Island": {
+"aliases": [],
+"area": null,
+"lat": -16.22,
+"lon": 150.02,
+"prefix": "VK9W"
+},
+"Yemen": {
+"aliases": [],
+"area": "a301",
+"lat": 15.65,
+"lon": 48.12,
+"prefix": "7O"
+},
+"Zambia": {
+"aliases": [],
+"area": "a305",
+"lat": -14.22,
+"lon": 26.73,
+"prefix": "9J"
+},
+"Zimbabwe": {
+"aliases": [],
+"area": "a306",
+"lat": -18.0,
+"lon": 31.0,
+"prefix": "Z2"
+}
+},
+"source": "cty.dat"
+}

@@ -23,6 +23,7 @@ from flask import Flask, Response, abort, flash, redirect, render_template, requ
 import db
 import labels
 import photomap_store
+import qso_map
 from adif import distinct_callsigns, parse_adif
 from mailer import send_qsl_request_email
 from qrz import (
@@ -963,6 +964,73 @@ def admin_qso_label_batch_pdf():
         mimetype="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+@app.route("/admin/qso-map")
+@admin_required
+def admin_qso_map():
+    """QSO Map -- a world map of the log by DXCC entity. Click a country
+    (or an island's dot) to list its QSOs, check some, and add them to
+    the same QSO-label batch QSO Labels uses. Map data and entity
+    matching live in qso_map.py; the batch routes are QSO Labels' own,
+    pointed back here with `next`.
+
+    `area` / `key` (optional) reopen a panel -- the add-to-batch forms
+    redirect back with them so the list stays open after adding."""
+    area = request.args.get("area", "")
+    key = request.args.get("key", "")
+    summary = {"areas": {}, "dots": [], "unplaced": [], "worked": 0, "total": 0, "qsos": 0}
+    try:
+        summary = qso_map.summary(photomap_store.list_all_my_qsos())
+    except S3Error as exc:
+        flash(s3_config_hint(exc), "error")
+
+    batch = session.get("qso_batch", [])
+    return render_template(
+        "admin_qso_map.html",
+        summary=summary,
+        open_area=area if area in summary["areas"] else "",
+        open_key=key,
+        batch=batch,
+        batch_ids=[b["qso_id"] for b in batch],
+        batch_full=len(batch) >= labels.QSO_LABEL_COUNT,
+        label_count=labels.QSO_LABEL_COUNT,
+        has_qrz_session=bool(qrz_key_or_none()),
+    )
+
+
+@app.route("/admin/qso-map/api/area")
+@admin_required
+def admin_qso_map_api_area():
+    """QSOs for one map area (`area` = polygon group id) or one entity
+    (`key` = cty entity name, or "?<stored name>" for an unplaced one),
+    grouped by entity, newest first."""
+    area = request.args.get("area", "")
+    key = request.args.get("key", "")
+    if area:
+        keys = qso_map.area_entities(area)
+    elif key:
+        keys = [key]
+    else:
+        return {"groups": []}, 400
+    try:
+        rows = photomap_store.list_all_my_qsos()
+    except S3Error as exc:
+        logger.warning("QSO map S3 error: %s", exc)
+        return {"groups": [], "error": "Couldn't read your log from S3."}, 502
+
+    found = qso_map.qsos_for_keys(rows, set(keys))
+    fields = ("id", "callsign", "qso_date", "time_on", "band", "mode")
+    groups = [
+        {
+            "key": k,
+            "name": (k[1:] or "(no entity recorded)") if k.startswith("?") else k,
+            "qsos": [{f: q.get(f) or "" for f in fields} for q in found[k]],
+        }
+        for k in keys
+    ]
+    groups.sort(key=lambda g: -len(g["qsos"]))
+    return {"groups": groups}
 
 
 # Merged into admin_qso_label() above on 2026-10-04 -- keep the old

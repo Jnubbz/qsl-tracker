@@ -10,6 +10,16 @@ A small Flask app for hams, part of [KN0BLE.com](https://kn0ble.com):
 - **QSO Labels** (`/admin/qso-label`, admin) -- your own logged QSOs,
   filterable by callsign or DXCC entity, printed onto Avery 5163 labels
   to stick on the card.
+- **QSO Map** (`/admin/qso-map`, admin) -- a world map of your log by
+  DXCC entity, shaded by QSO count. Click a country (or a small island's
+  dot) to list its QSOs, check some, and add them to the QSO Labels
+  sheet. Map outlines are Natural Earth 1:50m map subunits (public
+  domain), which already split out most separate DXCC entities (Alaska,
+  Hawaii, England/Scotland/Wales, European/Asiatic Russia, Canary
+  Islands, Sardinia ...); entity reference points come from AD1C's
+  cty.dat. Both are pre-built into `static/qso_map/areas.geojson` and
+  `qso_map_entities.json` by `tools/build_qso_map.py` (run by hand only
+  to refresh them; the app never fetches anything).
 - **QSL Cards / Photo Map** -- admin upload of scanned cards, shown on
   the public `/photomap`.
 - **Your log** (`/admin/log`, admin) -- the copy of your log behind QSO

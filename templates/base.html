@@ -16,6 +16,7 @@
       <a href="{{ url_for('photomap') }}">QSL Photo Map</a>
       {% if session.get('is_admin') %}
         <a href="{{ url_for('admin_qso_label') }}">QSO Labels</a>
+        <a href="{{ url_for('admin_qso_map') }}">QSO Map</a>
         <a href="{{ url_for('admin_photomap_manage') }}">QSL Cards</a>
       {% endif %}
     </nav>

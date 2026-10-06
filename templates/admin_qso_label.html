@@ -30,6 +30,7 @@
         </form>
       {% endif %}
       <a href="{{ url_for('admin_log') }}">Your log</a>
+      <a href="{{ url_for('admin_qso_map') }}">Pick from the map</a>
     </div>
 
     <form method="get" action="{{ url_for('admin_qso_label') }}" id="qso-filter-form">

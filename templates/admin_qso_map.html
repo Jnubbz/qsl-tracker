@@ -1,0 +1,387 @@
+{% extends "base.html" %}
+{% block title %}QSO Map{% endblock %}
+
+{% block extra_head %}
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+{% endblock %}
+
+{% block content %}
+  <section class="card">
+    <h1>QSO Map</h1>
+    <p class="muted">
+      Worked <strong class="qmap-stat">{{ summary.worked }}</strong> of {{ summary.total }}
+      DXCC entities &middot; {{ summary.qsos }} QSO{{ 's' if summary.qsos != 1 else '' }}.
+      Click a country (or an island's dot) to list its QSOs and add them to your label sheet.
+    </p>
+    <div id="qso-map" aria-label="World map of logged QSOs by DXCC entity"></div>
+    <div class="qmap-legend" aria-hidden="true">
+      <span><i style="background: var(--qmap-0)"></i>not worked</span>
+      <span><i style="background: var(--qmap-1)"></i>1&ndash;9</span>
+      <span><i style="background: var(--qmap-2)"></i>10&ndash;99</span>
+      <span><i style="background: var(--qmap-3)"></i>100&ndash;999</span>
+      <span><i style="background: var(--qmap-4)"></i>1,000+</span>
+      <span><i class="qmap-legend-dot"></i>island too small to draw</span>
+    </div>
+
+    {% if summary.unplaced %}
+      <p class="muted qmap-unplaced">
+        Not on the map (entity name not recognised):
+        {% for u in summary.unplaced %}
+          <button type="button" class="link-button qmap-key" data-key="{{ u.key }}">{{ u.name }} ({{ u.count }})</button>{% if not loop.last %},{% endif %}
+        {% endfor %}
+      </p>
+    {% endif %}
+  </section>
+
+  {% if batch %}
+    <section class="card qmap-batch">
+      <span>Label sheet: <strong>{{ batch | length }} of {{ label_count }}</strong> positions used.</span>
+      <a class="button-link" href="{{ url_for('admin_qso_label_batch_pdf') }}" target="_blank" rel="noopener">Download PDF</a>
+      <a href="{{ url_for('admin_qso_label') }}">Review / remove on QSO Labels</a>
+    </section>
+  {% endif %}
+
+  <section class="card" id="qmap-panel" hidden>
+    <div class="dashboard-top">
+      <h1 id="qmap-title"></h1>
+      <button type="button" class="link-button" id="qmap-close">Close</button>
+    </div>
+    <p class="muted" id="qmap-status"></p>
+    <div id="qmap-tools" hidden>
+      <label for="qmap-filter" class="visually-hidden">Filter</label>
+      <input type="text" id="qmap-filter" placeholder="Filter by callsign, band, mode, or date">
+    </div>
+    <div id="qmap-groups"></div>
+
+    <form method="post" action="{{ url_for('admin_qso_label_batch_add_selected') }}" id="qmap-add-form" class="qmap-add-bar" hidden>
+      <input type="hidden" name="next" id="qmap-next" value="{{ url_for('admin_qso_map') }}">
+      {% if batch_full %}
+        <span class="muted">Label sheet full ({{ label_count }} of {{ label_count }}) &mdash; download or clear it to add more.</span>
+      {% else %}
+        <button type="submit" id="qmap-add">Add checked to label sheet</button>
+        <span class="muted" id="qmap-count">{{ label_count - (batch | length) }} position{{ 's' if label_count - (batch | length) != 1 else '' }} free.</span>
+      {% endif %}
+    </form>
+  </section>
+
+  {# Per-row "Address" buttons post this form (one shared form, the
+     callsign filled in on click) into the Raw Address Ripper batch. #}
+  {% if has_qrz_session %}
+    <form method="post" action="{{ url_for('raw_address_batch_add') }}" id="qmap-address-form" hidden>
+      <input type="hidden" name="callsign" id="qmap-address-callsign">
+      <input type="hidden" name="next" id="qmap-address-next" value="{{ url_for('admin_qso_map') }}">
+    </form>
+  {% endif %}
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script>
+  (function () {
+    var SUMMARY = {{ summary | tojson }};
+    var BATCH_IDS = new Set({{ batch_ids | tojson }});
+    var BATCH_FULL = {{ 'true' if batch_full else 'false' }};
+    var FREE = {{ label_count - (batch | length) }};
+    var HAS_QRZ = {{ 'true' if has_qrz_session else 'false' }};
+    var OPEN_AREA = {{ open_area | tojson }};
+    var OPEN_KEY = {{ open_key | tojson }};
+    var API = {{ url_for('admin_qso_map_api_area') | tojson }};
+    var SELF = {{ url_for('admin_qso_map') | tojson }};
+    var PREVIEW = {{ url_for('admin_qso_label') | tojson }};
+    var ROWS_SHOWN = 100;
+
+    var css = getComputedStyle(document.documentElement);
+    function v(name) { return css.getPropertyValue(name).trim(); }
+    function shade(n) {
+      if (!n) return v('--qmap-0');
+      if (n < 10) return v('--qmap-1');
+      if (n < 100) return v('--qmap-2');
+      if (n < 1000) return v('--qmap-3');
+      return v('--qmap-4');
+    }
+
+    var map = L.map('qso-map', {
+      minZoom: 0, maxZoom: 8, worldCopyJump: false,
+      maxBounds: [[-90, -220], [90, 220]], maxBoundsViscosity: 0.8,
+      zoomSnap: 0.5, attributionControl: true
+    });
+    // Phones: start zoomed on the Americas / Europe / Africa rather than
+    // a tiny whole world; wider screens fit the whole world.
+    if (document.getElementById('qso-map').clientWidth < 520) map.setView([30, -35], 1);
+    else map.fitBounds([[-50, -170], [75, 190]]);
+    map.attributionControl.setPrefix(false);
+    map.attributionControl.addAttribution('Natural Earth · cty.dat (AD1C)');
+
+    var layersByArea = {};
+    var selected = null;
+
+    function areaInfo(id) { return SUMMARY.areas[id]; }
+    function baseStyle(id) {
+      var a = areaInfo(id);
+      return {
+        fillColor: shade(a ? a.count : 0), fillOpacity: 1,
+        color: v('--qmap-line'), weight: 0.6
+      };
+    }
+    function setSelected(id) {
+      if (selected && layersByArea[selected]) {
+        layersByArea[selected].forEach(function (l) { l.setStyle(baseStyle(selected)); });
+      }
+      selected = id;
+      if (id && layersByArea[id]) {
+        layersByArea[id].forEach(function (l) {
+          l.setStyle({ color: v('--qmap-select'), weight: 2 });
+          l.bringToFront();
+        });
+      }
+    }
+
+    function tooltipText(id, fallbackName) {
+      var a = areaInfo(id);
+      if (!a) return fallbackName;
+      if (!a.count) return fallbackName + ' — not worked yet';
+      return a.entities.map(function (e) { return e[0] + ': ' + e[1]; }).join('\n');
+    }
+
+    fetch({{ url_for('static', filename='qso_map/areas.geojson') | tojson }})
+      .then(function (r) { return r.json(); })
+      .then(function (geo) {
+        L.geoJSON(geo, {
+          style: function (f) { return baseStyle(f.properties.area); },
+          onEachFeature: function (f, layer) {
+            var id = f.properties.area;
+            (layersByArea[id] = layersByArea[id] || []).push(layer);
+            var clickable = !!areaInfo(id);
+            layer.bindTooltip(function () { return tooltipText(id, f.properties.name); },
+                              { sticky: true, className: 'qmap-tip' });
+            if (clickable) {
+              layer.on('click', function () { openArea(id); });
+              layer.on('mouseover', function () { if (id !== selected) layers(id, { weight: 1.4, color: v('--qmap-hover') }); });
+              layer.on('mouseout', function () { if (id !== selected) layers(id, baseStyle(id)); });
+            }
+          }
+        }).addTo(map);
+
+        SUMMARY.dots.forEach(function (d) {
+          var m = L.circleMarker([d.lat, d.lon], {
+            radius: d.count ? 5 : 3,
+            fillColor: d.count ? shade(d.count) : v('--qmap-dot-off'),
+            fillOpacity: 1, color: d.count ? v('--qmap-select') : v('--qmap-line'),
+            weight: d.count ? 1 : 0.5
+          }).addTo(map);
+          m.bindTooltip(d.name + (d.count ? ': ' + d.count : ' — not worked yet'), { className: 'qmap-tip' });
+          m.on('click', function () { setSelected(null); openKey(d.key, d.name); });
+        });
+
+        if (OPEN_AREA) openArea(OPEN_AREA);
+        else if (OPEN_KEY) openKey(OPEN_KEY, OPEN_KEY.replace(/^\?/, ''));
+      })
+      .catch(function () {
+        document.getElementById('qso-map').textContent = 'The map outline file failed to load.';
+      });
+
+    function layers(id, style) { (layersByArea[id] || []).forEach(function (l) { l.setStyle(style); }); }
+
+    document.querySelectorAll('.qmap-key').forEach(function (b) {
+      b.addEventListener('click', function () { setSelected(null); openKey(b.dataset.key, b.textContent); });
+    });
+
+    // ---- the QSO panel -----------------------------------------------
+    var panel = document.getElementById('qmap-panel');
+    var titleEl = document.getElementById('qmap-title');
+    var statusEl = document.getElementById('qmap-status');
+    var toolsEl = document.getElementById('qmap-tools');
+    var filterEl = document.getElementById('qmap-filter');
+    var groupsEl = document.getElementById('qmap-groups');
+    var addForm = document.getElementById('qmap-add-form');
+    var nextEl = document.getElementById('qmap-next');
+    var countEl = document.getElementById('qmap-count');
+    var addrNext = document.getElementById('qmap-address-next');
+
+    var groups = [];          // [{key, name, qsos}]
+    var expanded = new Set(); // group keys showing every row
+    var checked = new Set();  // qso ids
+
+    document.getElementById('qmap-close').addEventListener('click', function () {
+      panel.hidden = true; setSelected(null);
+      history.replaceState(null, '', SELF);
+    });
+    filterEl.addEventListener('input', render);
+
+    function openArea(id) {
+      setSelected(id);
+      var a = areaInfo(id);
+      var names = a && a.entities.length ? a.entities.map(function (e) { return e[0]; }) : [];
+      load('area=' + encodeURIComponent(id), names.join(' / '), SELF + '?area=' + encodeURIComponent(id));
+    }
+    function openKey(key, name) {
+      load('key=' + encodeURIComponent(key), name, SELF + '?key=' + encodeURIComponent(key));
+    }
+
+    function load(query, title, here) {
+      panel.hidden = false;
+      titleEl.textContent = title || '…';
+      statusEl.textContent = 'Loading…';
+      toolsEl.hidden = true; addForm.hidden = true;
+      groupsEl.textContent = '';
+      groups = []; expanded = new Set(); checked = new Set(); filterEl.value = '';
+      nextEl.value = here;
+      if (addrNext) addrNext.value = here;
+      history.replaceState(null, '', here);
+      panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+      fetch(API + '?' + query)
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (data.error) { statusEl.textContent = data.error; return; }
+          groups = data.groups || [];
+          var withQsos = groups.filter(function (g) { return g.qsos.length; });
+          if (!title) titleEl.textContent = groups.map(function (g) { return g.name; }).join(' / ');
+          var total = withQsos.reduce(function (n, g) { return n + g.qsos.length; }, 0);
+          if (!total) {
+            statusEl.textContent = 'No QSOs logged with ' + groups.map(function (g) { return g.name; }).join(' or ') + ' yet.';
+            return;
+          }
+          titleEl.textContent = withQsos.map(function (g) { return g.name; }).join(' / ');
+          statusEl.textContent = total + ' QSO' + (total === 1 ? '' : 's') + ', newest first.';
+          toolsEl.hidden = total < 8;
+          addForm.hidden = false;
+          render();
+        })
+        .catch(function () { statusEl.textContent = 'Couldn’t load the QSOs — try again.'; });
+    }
+
+    function matches(q, f) {
+      if (!f) return true;
+      return [q.callsign, q.band, q.mode, q.qso_date].join(' ').toUpperCase().indexOf(f) !== -1;
+    }
+
+    function el(tag, text, cls) {
+      var e = document.createElement(tag);
+      if (text != null) e.textContent = text;
+      if (cls) e.className = cls;
+      return e;
+    }
+    function fmtDate(d) { return d && d.length === 8 ? d.slice(0, 4) + '-' + d.slice(4, 6) + '-' + d.slice(6) : (d || '-'); }
+    function fmtTime(t) { return t && t.length >= 4 ? t.slice(0, 2) + ':' + t.slice(2, 4) : (t || '-'); }
+
+    function render() {
+      var f = filterEl.value.trim().toUpperCase();
+      groupsEl.textContent = '';
+      var multi = groups.filter(function (g) { return g.qsos.length; }).length > 1;
+      groups.forEach(function (g) {
+        if (!g.qsos.length) return;
+        var rows = g.qsos.filter(function (q) { return matches(q, f); });
+        var wrap = el('div', null, 'qmap-group');
+        if (multi) wrap.appendChild(el('h2', g.name + ' (' + g.qsos.length + ')'));
+        if (!rows.length) {
+          wrap.appendChild(el('p', 'Nothing matches the filter.', 'muted'));
+          groupsEl.appendChild(wrap);
+          return;
+        }
+        var limit = expanded.has(g.key) || f ? rows.length : Math.min(rows.length, ROWS_SHOWN);
+
+        var table = el('table', null, 'contacts');
+        var head = el('tr');
+        var th0 = el('th');
+        if (!BATCH_FULL) {
+          var all = el('input'); all.type = 'checkbox';
+          all.setAttribute('aria-label', 'Select all shown in ' + g.name);
+          all.addEventListener('change', function () {
+            rows.slice(0, limit).forEach(function (q) {
+              if (BATCH_IDS.has(q.id)) return;
+              if (all.checked) checked.add(q.id); else checked.delete(q.id);
+            });
+            render();
+          });
+          th0.appendChild(all);
+        }
+        head.appendChild(th0);
+        ['Callsign', 'Date', 'UTC', 'Band / Mode', ''].forEach(function (h) { head.appendChild(el('th', h)); });
+        var thead = el('thead'); thead.appendChild(head); table.appendChild(thead);
+
+        var tbody = el('tbody');
+        rows.slice(0, limit).forEach(function (q) {
+          var tr = el('tr');
+          var td0 = el('td');
+          var cb = null;
+          if (BATCH_IDS.has(q.id)) {
+            td0.appendChild(el('span', 'on sheet', 'qmap-tag'));
+            tr.className = 'direct';
+          } else if (!BATCH_FULL) {
+            cb = el('input'); cb.type = 'checkbox'; cb.name = 'qso_id'; cb.value = q.id;
+            cb.setAttribute('form', 'qmap-add-form');
+            cb.setAttribute('aria-label', 'Select ' + q.callsign + ' ' + fmtDate(q.qso_date));
+            cb.checked = checked.has(q.id);
+            cb.addEventListener('change', function () {
+              if (cb.checked) checked.add(q.id); else checked.delete(q.id);
+              updateCount();
+            });
+            td0.appendChild(cb);
+          }
+          tr.appendChild(td0);
+          tr.appendChild(el('td', q.callsign, 'qmap-call'));
+          tr.appendChild(el('td', fmtDate(q.qso_date)));
+          tr.appendChild(el('td', fmtTime(q.time_on)));
+          tr.appendChild(el('td', [q.band, q.mode].filter(Boolean).join(' / ') || '-'));
+          var act = el('td', null, 'qmap-actions');
+          var pv = el('a', 'Preview');
+          pv.href = PREVIEW + '?callsign=' + encodeURIComponent(q.callsign) + '&qso_key=' + q.id;
+          act.appendChild(pv);
+          if (HAS_QRZ) {
+            var ab = el('button', 'Address', 'link-button'); ab.type = 'button';
+            ab.addEventListener('click', function () {
+              document.getElementById('qmap-address-callsign').value = q.callsign;
+              document.getElementById('qmap-address-form').submit();
+            });
+            act.appendChild(ab);
+          }
+          tr.appendChild(act);
+          // Tapping anywhere on a row toggles it -- easier than hitting
+          // a small checkbox on a phone.
+          tr.addEventListener('click', function (ev) {
+            if (!cb || ev.target === cb || ev.target.closest('a, button')) return;
+            cb.checked = !cb.checked;
+            cb.dispatchEvent(new Event('change'));
+          });
+          tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        var scroller = el('div', null, 'qmap-table');
+        scroller.appendChild(table);
+        wrap.appendChild(scroller);
+
+        if (limit < rows.length) {
+          var more = el('button', 'Show all ' + rows.length, 'link-button qmap-more'); more.type = 'button';
+          more.addEventListener('click', function () { expanded.add(g.key); render(); });
+          wrap.appendChild(more);
+        }
+        groupsEl.appendChild(wrap);
+      });
+      updateCount();
+    }
+
+    function updateCount() {
+      if (!countEl) return;
+      var n = checked.size;
+      countEl.textContent = (n ? n + ' checked · ' : '') + FREE + ' position' + (FREE === 1 ? '' : 's') + ' free.';
+      countEl.classList.toggle('qmap-over', n > FREE);
+    }
+
+    // Checked boxes hidden by the filter or "show first 100" aren't in
+    // the DOM, so add them as hidden fields when the form is sent.
+    addForm.addEventListener('submit', function (e) {
+      if (!checked.size) { e.preventDefault(); statusEl.textContent = 'Check at least one QSO first.'; return; }
+      addForm.querySelectorAll('input.qmap-extra').forEach(function (i) { i.remove(); });
+      var inDom = new Set(Array.prototype.map.call(
+        document.querySelectorAll('input[name="qso_id"][form="qmap-add-form"]:checked'),
+        function (i) { return Number(i.value); }));
+      checked.forEach(function (id) {
+        if (inDom.has(id)) return;
+        var h = el('input'); h.type = 'hidden'; h.name = 'qso_id'; h.value = id; h.className = 'qmap-extra';
+        addForm.appendChild(h);
+      });
+    });
+  })();
+  </script>
+{% endblock %}
