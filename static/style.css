@@ -87,6 +87,7 @@ label {
 
 input[type="text"],
 input[type="password"],
+input[type="number"],
 input[type="file"] {
   padding: 0.55rem 0.7rem;
   border: 1px solid var(--border);
@@ -97,7 +98,8 @@ input[type="file"] {
 }
 
 input[type="text"]:focus,
-input[type="password"]:focus {
+input[type="password"]:focus,
+input[type="number"]:focus {
   outline: none;
   border-color: var(--accent);
 }
@@ -501,3 +503,16 @@ form[hidden] { display: none; }
   .qmap-table table.contacts td { padding: 0.45rem 0.3rem; }
   .qmap-actions .link-button { margin-left: 0.4rem; }
 }
+
+/* QSO Labels: "Show 25/50/100/200" row-count picker above the table */
+.qso-show-form {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.75rem;
+}
+.qso-show-form label { margin: 0; }
+.qso-show-form select { width: auto; margin: 0; }
+.card-nudge-form input[type="number"] { max-width: 8rem; }

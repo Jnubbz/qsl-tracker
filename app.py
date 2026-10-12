@@ -110,8 +110,12 @@ QRZ_SYNC_TIME_BUDGET_SECONDS = 12
 QRZ_SYNC_RECENT_DAYS = 7
 
 # Big logs make an unfiltered QSO Labels table enormous -- show this
-# many most-recent rows and ask for a filter to see further back.
-QSO_TABLE_ROW_CAP = 200
+# many most-recent rows and ask for a filter to see further back. The
+# page has a "Show" dropdown (QSO_TABLE_SHOW_OPTIONS), remembered in the
+# session; QSO_TABLE_ROW_CAP is the default and the most it ever shows
+# is the largest option.
+QSO_TABLE_SHOW_OPTIONS = (25, 50, 100, 200)
+QSO_TABLE_ROW_CAP = 25
 
 
 @app.template_filter("utc_time")
@@ -716,7 +720,14 @@ def admin_qso_label():
     except S3Error as exc:
         flash(s3_config_hint(exc), "error")
 
-    shown_rows = rows[:QSO_TABLE_ROW_CAP]
+    show = _parse_int(request.args.get("show"), default=0)
+    if show in QSO_TABLE_SHOW_OPTIONS:
+        session["qso_table_show"] = show
+    else:
+        show = session.get("qso_table_show")
+        if show not in QSO_TABLE_SHOW_OPTIONS:
+            show = QSO_TABLE_ROW_CAP
+    shown_rows = rows[:show]
     self_url = url_for(
         "admin_qso_label", callsign=callsign or None, entity=entity or None
     )
@@ -731,7 +742,8 @@ def admin_qso_label():
         entities=entities,
         rows=shown_rows,
         row_count=len(rows),
-        row_cap=QSO_TABLE_ROW_CAP,
+        row_cap=show,
+        show_options=QSO_TABLE_SHOW_OPTIONS,
         total_qsos=total,
         sync_state=sync_state,
         logbook_configured=bool(QRZ_LOGBOOK_API_KEY),
