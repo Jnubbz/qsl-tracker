@@ -88,6 +88,13 @@
            href="{{ url_for('admin_qso_label_pdf', qso_key=qso['id'], position=position) }}"
            target="_blank" rel="noopener">Download PDF label (position {{ position }})</a>
         &nbsp;
+        <a class="button-link"
+           href="{{ url_for('admin_qso_card_pdf', qso_key=qso['id']) }}"
+           target="_blank" rel="noopener">Print on the card (6&times;4)</a>
+        &nbsp;
+        <a href="{{ url_for('admin_qso_card_pdf', qso_key=qso['id'], proof=1) }}"
+           target="_blank" rel="noopener">Proof on the card scan</a>
+        &nbsp;
         <a href="{{ self_url }}">Close preview</a>
       </p>
 
@@ -139,11 +146,41 @@
       <p style="margin-top: 1rem;">
         <a class="button-link" href="{{ url_for('admin_qso_label_batch_pdf') }}" target="_blank" rel="noopener">Download batch PDF ({{ batch | length }} label{{ 's' if batch | length != 1 else '' }})</a>
         &nbsp;
+        <a class="button-link" href="{{ url_for('admin_qso_batch_card_pdf') }}" target="_blank" rel="noopener">Print on the cards ({{ batch | length }} card{{ 's' if batch | length != 1 else '' }})</a>
+        &nbsp;
+        <a href="{{ url_for('admin_qso_batch_card_pdf', proof=1) }}" target="_blank" rel="noopener">Proof</a>
+        &nbsp;
         <form method="post" action="{{ url_for('admin_qso_label_batch_clear') }}" style="display: inline;">
           <input type="hidden" name="next" value="{{ self_url }}">
           <button type="submit" class="link-button">Clear batch</button>
         </form>
       </p>
+    </section>
+  {% endif %}
+
+  {% if qso or batch %}
+    <section class="card">
+      <h2>Printing on the card</h2>
+      <p class="muted">
+        &ldquo;Print on the card&rdquo; makes one 6&times;4 page per QSO with the
+        details in the blank lower-left of the card back. Print at
+        <strong>actual size / 100%</strong> (not &ldquo;fit to page&rdquo;) with
+        the paper size set to 4&times;6, card back facing the print side.
+        Try one on plain paper cut to 4&times;6 first; if the text lands off,
+        nudge it here and the setting sticks for every print after.
+      </p>
+      <form method="post" action="{{ url_for('admin_qso_card_settings') }}">
+        <input type="hidden" name="next" value="{{ request.full_path if qso else self_url }}">
+        <label for="nudge_x">Move right (inches, negative = left)</label>
+        <input type="number" id="nudge_x" name="nudge_x" step="0.01"
+               min="-{{ card_nudge_max }}" max="{{ card_nudge_max }}"
+               value="{{ '%.2f' | format(card_nudge.nudge_x) }}">
+        <label for="nudge_y">Move down (inches, negative = up)</label>
+        <input type="number" id="nudge_y" name="nudge_y" step="0.01"
+               min="-{{ card_nudge_max }}" max="{{ card_nudge_max }}"
+               value="{{ '%.2f' | format(card_nudge.nudge_y) }}">
+        <button type="submit">Save alignment</button>
+      </form>
     </section>
   {% endif %}
 

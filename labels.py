@@ -42,6 +42,7 @@ only one place that knows how to lay text out inside a label cell.
 from __future__ import annotations
 
 import io
+import os
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -317,58 +318,136 @@ _QSO_PAIR_VALUE_FONT, _QSO_PAIR_VALUE_SIZE = "Helvetica", 10.5
 _QSO_ROW_HEIGHT = 0.32 * inch
 
 
+def _draw_qso_grid(c, qso: dict, x0: float, y0: float, box_w: float, box_h: float, padding: float) -> None:
+    """Draw one QSO's details grid inside the box whose bottom-left is
+    (x0, y0): the callsign as a centered header banner, the date/time
+    underneath, a divider rule, then Band/Mode/Freq/Grid/RST Sent/RST
+    Rcvd (whichever the QSO actually has) as labeled pairs two to a row.
+    Shared by the Avery 5163 label sheet and the print-on-the-card page,
+    so the two never drift apart."""
+    fields = qso_label_fields(qso)
+    inner_w = box_w - 2 * padding
+    col_w = inner_w / 2
+    center_x = x0 + box_w / 2
+    top = y0 + box_h - padding
+
+    c.setFont(_QSO_HEADER_FONT, _QSO_HEADER_SIZE)
+    y = top - _QSO_HEADER_SIZE * 0.85
+    c.drawCentredString(center_x, y, fields["header"])
+
+    if fields["subheader"]:
+        c.setFont(_QSO_SUB_FONT, _QSO_SUB_SIZE)
+        y -= _QSO_SUB_SIZE + 4
+        c.drawCentredString(center_x, y, fields["subheader"])
+
+    pairs = fields["pairs"]
+    if pairs:
+        y -= 10
+        c.setLineWidth(0.75)
+        c.line(x0 + padding, y, x0 + box_w - padding, y)
+        y -= _QSO_ROW_HEIGHT * 0.75
+
+        for i, (label, value) in enumerate(pairs):
+            row, col = divmod(i, 2)
+            cell_x = x0 + padding + col * col_w
+            cell_y = y - row * _QSO_ROW_HEIGHT
+
+            c.setFont(_QSO_PAIR_LABEL_FONT, _QSO_PAIR_LABEL_SIZE)
+            label_text = f"{label}: "
+            c.drawString(cell_x, cell_y, label_text)
+
+            c.setFont(_QSO_PAIR_VALUE_FONT, _QSO_PAIR_VALUE_SIZE)
+            value_x = cell_x + stringWidth(label_text, _QSO_PAIR_LABEL_FONT, _QSO_PAIR_LABEL_SIZE)
+            c.drawString(value_x, cell_y, value)
+
+
 def _render_qso_grid_pdf_multi(entries: list[tuple[dict, int]], title: str) -> bytes:
     """Render a single US Letter PDF with each `(qso, position)` in
     `entries` drawn as a two-column details grid at its own Avery 5163
-    position, everything else left blank: the callsign as a centered
-    header banner, the date/time underneath, a divider rule, then
-    Band/Mode/Freq/Grid/RST Sent/RST Rcvd (whichever the QSO actually
-    has) as labeled pairs two to a row -- filling the full 4"x2" cell
-    instead of a few short centered lines huddled in the middle of it."""
+    position, everything else left blank."""
     layout = QSO_LAYOUT
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
     c.setTitle(title)
 
-    inner_w = layout.label_w - 2 * layout.padding
-    col_w = inner_w / 2
-
     for qso, position in entries:
-        fields = qso_label_fields(qso)
         x0, y0 = layout.origin(position)
-        center_x = x0 + layout.label_w / 2
-        top = y0 + layout.label_h - layout.padding
-
-        c.setFont(_QSO_HEADER_FONT, _QSO_HEADER_SIZE)
-        y = top - _QSO_HEADER_SIZE * 0.85
-        c.drawCentredString(center_x, y, fields["header"])
-
-        if fields["subheader"]:
-            c.setFont(_QSO_SUB_FONT, _QSO_SUB_SIZE)
-            y -= _QSO_SUB_SIZE + 4
-            c.drawCentredString(center_x, y, fields["subheader"])
-
-        pairs = fields["pairs"]
-        if pairs:
-            y -= 10
-            c.setLineWidth(0.75)
-            c.line(x0 + layout.padding, y, x0 + layout.label_w - layout.padding, y)
-            y -= _QSO_ROW_HEIGHT * 0.75
-
-            for i, (label, value) in enumerate(pairs):
-                row, col = divmod(i, 2)
-                cell_x = x0 + layout.padding + col * col_w
-                cell_y = y - row * _QSO_ROW_HEIGHT
-
-                c.setFont(_QSO_PAIR_LABEL_FONT, _QSO_PAIR_LABEL_SIZE)
-                label_text = f"{label}: "
-                c.drawString(cell_x, cell_y, label_text)
-
-                c.setFont(_QSO_PAIR_VALUE_FONT, _QSO_PAIR_VALUE_SIZE)
-                value_x = cell_x + stringWidth(label_text, _QSO_PAIR_LABEL_FONT, _QSO_PAIR_LABEL_SIZE)
-                c.drawString(value_x, cell_y, value)
+        _draw_qso_grid(c, qso, x0, y0, layout.label_w, layout.label_h, layout.padding)
 
     c.showPage()
+    c.save()
+    return buffer.getvalue()
+
+
+# ---------------------------------------------------------------------
+# Print straight onto the QSL card (added 2026-10-11)
+# ---------------------------------------------------------------------
+# The back of Josh's 6"x4" card has a printed map of Florida on the
+# right and the Radio/Antenna checkboxes top-left, leaving a blank
+# ~4.3"x2.4" area in the lower-left (the Gulf of Mexico). Measured off a
+# 300 dpi scan: the checkbox block ends 1.5" from the top, the panhandle
+# coast is above that, and the peninsula's west coast never comes
+# closer than ~4.35" from the left edge below the 1.6" line. The same
+# 4"x2" grid as the label goes there, so the card looks like it would
+# with a label stuck on -- just without the label.
+CARD_W, CARD_H = 6.0 * inch, 4.0 * inch
+CARD_BOX_LEFT = 0.15 * inch   # from the card's left edge
+CARD_BOX_TOP = 1.8 * inch     # from the card's top edge
+CARD_BOX_W, CARD_BOX_H = 4.0 * inch, 2.0 * inch
+CARD_BOX_PADDING = 0.2 * inch
+# Printers rarely put a 4x6 card exactly where the PDF says -- the
+# nudge (inches, + = right / + = down) corrects for that once dialed in
+# on a test card. Capped so a typo can't push the text off the card.
+CARD_NUDGE_MAX = 0.5
+# The scanned back of the card, drawn underneath on a "proof" page so
+# the placement can be checked on screen before using a real card.
+CARD_BACK_IMAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "card", "qsl_card_back.jpg")
+
+
+def clamp_card_nudge(value) -> float:
+    """Parse a nudge in inches, clamped to +/-CARD_NUDGE_MAX and rounded
+    to 0.01"; anything unparseable is 0."""
+    try:
+        v = float(str(value).strip())
+    except (TypeError, ValueError):
+        return 0.0
+    if v != v:  # NaN
+        return 0.0
+    return round(max(-CARD_NUDGE_MAX, min(CARD_NUDGE_MAX, v)), 2)
+
+
+def generate_qso_card_pdf(
+    qsos: list[dict], nudge_x: float = 0.0, nudge_y: float = 0.0, proof: bool = False
+) -> bytes:
+    """One 6"x4" landscape page per QSO, with the QSO details grid in
+    the card's blank lower-left area -- fed straight through the printer
+    on the card itself, no label. `nudge_x`/`nudge_y` (inches; + moves
+    right / down) shift the text to correct for where a given printer
+    actually lands it. `proof=True` draws the scanned card back under
+    the text and outlines the box, for checking placement on screen --
+    never print a proof onto a real card."""
+    nudge_x = clamp_card_nudge(nudge_x)
+    nudge_y = clamp_card_nudge(nudge_y)
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=(CARD_W, CARD_H))
+    c.setTitle("QSL card proof" if proof else "QSO details for QSL cards")
+
+    x0 = CARD_BOX_LEFT + nudge_x * inch
+    y0 = CARD_H - CARD_BOX_TOP - CARD_BOX_H - nudge_y * inch
+
+    for qso in qsos:
+        if proof:
+            if os.path.exists(CARD_BACK_IMAGE):
+                c.drawImage(CARD_BACK_IMAGE, 0, 0, width=CARD_W, height=CARD_H)
+            c.saveState()
+            c.setStrokeColorRGB(0.85, 0.1, 0.1)
+            c.setDash(3, 3)
+            c.setLineWidth(0.6)
+            c.rect(x0, y0, CARD_BOX_W, CARD_BOX_H)
+            c.restoreState()
+        _draw_qso_grid(c, qso, x0, y0, CARD_BOX_W, CARD_BOX_H, CARD_BOX_PADDING)
+        c.showPage()
+
     c.save()
     return buffer.getvalue()
 

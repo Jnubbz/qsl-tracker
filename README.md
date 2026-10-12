@@ -9,7 +9,11 @@ A small Flask app for hams, part of [KN0BLE.com](https://kn0ble.com):
   a QSL manager. Nothing looked up or uploaded is stored.
 - **QSO Labels** (`/admin/qso-label`, admin) -- your own logged QSOs,
   filterable by callsign or DXCC entity, printed onto Avery 5163 labels
-  to stick on the card.
+  to stick on the card, or printed **straight onto the 6"x4" QSL card** ("Print on the card"):
+  one 6x4 page per QSO, the same details grid placed in the blank
+  lower-left of the card back. "Proof" draws it over a scan of the card
+  (`static/card/qsl_card_back.jpg`) for checking on screen; a saved
+  right/down nudge corrects for where the printer actually lands it.
 - **QSO Map** (`/admin/qso-map`, admin) -- a world map of your log by
   DXCC entity, shaded by QSO count. Click a country (or a small island's
   dot) to list its QSOs, check some, and add them to the QSO Labels

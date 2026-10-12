@@ -702,11 +702,13 @@ def admin_qso_label():
     entities = []
     total = 0
     sync_state = {}
+    card_nudge = {"nudge_x": 0.0, "nudge_y": 0.0}
     try:
         entities = photomap_store.list_dxcc_entities()
         rows = photomap_store.list_all_my_qsos(dxcc_entity=entity, callsign=callsign)
         total = photomap_store.count_my_qsos()
         sync_state = photomap_store.qrz_sync_state()
+        card_nudge = photomap_store.card_print_settings()
         if qso_key:
             qso = photomap_store.get_my_qso(_parse_int(qso_key, default=0))
             if qso is None:
@@ -744,6 +746,8 @@ def admin_qso_label():
         address_batch_count=len(address_batch),
         mailing_label_count=labels.MAILING_LABEL_COUNT,
         has_qrz_session=bool(qrz_key_or_none()),
+        card_nudge=card_nudge,
+        card_nudge_max=labels.CARD_NUDGE_MAX,
     )
 
 
@@ -964,6 +968,88 @@ def admin_qso_label_batch_pdf():
         mimetype="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+def _card_nudge() -> tuple[float, float]:
+    """Saved printer nudge for card printing; a `nudge_x`/`nudge_y`
+    query param overrides it for one download (handy for a quick test)."""
+    try:
+        saved = photomap_store.card_print_settings()
+    except S3Error:
+        saved = {"nudge_x": 0.0, "nudge_y": 0.0}
+    nx = request.args.get("nudge_x")
+    ny = request.args.get("nudge_y")
+    return (
+        labels.clamp_card_nudge(nx if nx is not None else saved["nudge_x"]),
+        labels.clamp_card_nudge(ny if ny is not None else saved["nudge_y"]),
+    )
+
+
+def _card_pdf_response(qsos: list[dict], filename_stem: str) -> Response:
+    proof = request.args.get("proof") == "1"
+    nudge_x, nudge_y = _card_nudge()
+    pdf_bytes = labels.generate_qso_card_pdf(qsos, nudge_x, nudge_y, proof=proof)
+    filename = f"{filename_stem}{'-proof' if proof else ''}.pdf"
+    # Proofs open inline (look, don't print); real prints download.
+    disposition = "inline" if proof else "attachment"
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={"Content-Disposition": f"{disposition}; filename={filename}"},
+    )
+
+
+@app.route("/admin/qso-label/card-pdf")
+@admin_required
+def admin_qso_card_pdf():
+    """One QSO printed straight onto the QSL card: a 6"x4" page with the
+    details grid in the card's blank lower-left area. `proof=1` draws
+    the scanned card back underneath instead, for checking placement."""
+    qso_id = _parse_int(request.args.get("qso_key"), default=0)
+    if not qso_id:
+        abort(400)
+    try:
+        qso = photomap_store.get_my_qso(qso_id)
+    except S3Error:
+        abort(502)
+    if qso is None:
+        abort(404)
+    return _card_pdf_response([qso], f"qsl-card-{qso['callsign']}-{qso.get('qso_date', '')}")
+
+
+@app.route("/admin/qso-label/batch/card-pdf")
+@admin_required
+def admin_qso_batch_card_pdf():
+    """Every QSO in the batch, one 6"x4" card page each, in sheet-position
+    order (so the stack of cards matches the batch list)."""
+    batch = session.get("qso_batch", [])
+    if not batch:
+        abort(400)
+    qsos = []
+    for entry in sorted(batch, key=lambda b: b["position"]):
+        try:
+            qso = photomap_store.get_my_qso(entry["qso_id"])
+        except S3Error:
+            abort(502)
+        if qso is not None:
+            qsos.append(qso)
+    if not qsos:
+        abort(404)
+    return _card_pdf_response(qsos, f"qsl-cards-batch-{date.today().isoformat()}")
+
+
+@app.route("/admin/qso-label/card-settings", methods=["POST"])
+@admin_required
+def admin_qso_card_settings():
+    """Save the printer nudge used for every card print from now on."""
+    nudge_x = labels.clamp_card_nudge(request.form.get("nudge_x", "0"))
+    nudge_y = labels.clamp_card_nudge(request.form.get("nudge_y", "0"))
+    try:
+        photomap_store.save_card_print_settings(nudge_x, nudge_y)
+        flash(f'Card alignment saved: {nudge_x:+.2f}" right, {nudge_y:+.2f}" down.', "success")
+    except S3Error as exc:
+        flash(s3_config_hint(exc), "error")
+    return redirect(_safe_next(url_for("admin_qso_label")))
 
 
 @app.route("/admin/qso-map")

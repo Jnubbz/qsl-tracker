@@ -45,6 +45,8 @@ def _empty() -> dict:
         "next_my_qso_id": 1,
         # QRZ Logbook sync cursor -- see qrz_sync_state() below.
         "qrz_sync": {},
+        # Print-on-the-card alignment -- see card_print_settings() below.
+        "card_print": {},
     }
 
 
@@ -468,6 +470,30 @@ def save_qrz_sync_state(state: dict) -> None:
     merged = dict(data.get("qrz_sync") or {})
     merged.update(state)
     data["qrz_sync"] = merged
+    _save(data)
+
+
+# ---------------------------------------------------------------------
+# Print-on-the-card alignment
+# ---------------------------------------------------------------------
+
+def card_print_settings() -> dict:
+    """The printer nudge for printing QSO details straight onto the QSL
+    card: `nudge_x` / `nudge_y` in inches (+ = right / down). Zeros until
+    Josh saves something."""
+    saved = _load().get("card_print") or {}
+    out = {"nudge_x": 0.0, "nudge_y": 0.0}
+    for key in out:
+        try:
+            out[key] = float(saved.get(key, 0.0))
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def save_card_print_settings(nudge_x: float, nudge_y: float) -> None:
+    data = _load()
+    data["card_print"] = {"nudge_x": nudge_x, "nudge_y": nudge_y}
     _save(data)
 
 
