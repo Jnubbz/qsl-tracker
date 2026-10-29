@@ -1,27 +1,28 @@
 {% extends "base.html" %}
+{% import "macros.html" as ui %}
 {% block title %}Admin log in -- QSL Tracker{% endblock %}
 {% block content %}
   <section class="card">
     {% if stage == "qrz" %}
       <h1>Log in with QRZ</h1>
       <p class="muted">
-        First step: the QSL Photo Map's upload tools need a QRZ session
-        to look up a new callsign's map location. Log in once here and
-        you won't be asked again this session (or if you're already
-        logged in to QRZ elsewhere on the site).
+        First step of admin log in. Logbook, QSO Labels, and QSL Cards
+        use a QRZ session (a new callsign's map location is looked up
+        from QRZ). Log in once here and you won't be asked again this
+        session, including if you already logged in for ADIF Address Extractor.
       </p>
       <form method="post" action="{{ url_for('admin_login') }}">
 {% include "_csrf.html" %}
         <input type="hidden" name="next" value="{{ next }}">
-        <label for="qrz_username">QRZ username</label>
-        <input type="text" id="qrz_username" name="qrz_username" autocomplete="username" required autofocus>
-        <label for="qrz_password">QRZ password</label>
-        <input type="password" id="qrz_password" name="qrz_password" autocomplete="current-password" required>
+        {{ ui.qrz_login_fields(autofocus=true) }}
         <button type="submit">Log in to QRZ</button>
       </form>
     {% else %}
       <h1>Admin log in</h1>
-      <p class="muted">This gates the QSL Photo Map's upload tools -- not the public site.</p>
+      <p class="muted">
+        This opens Logbook, QSO Labels, QSO Map, and QSL Cards.
+        ADIF Address Extractor, the QSL Photo Map, and Request a Card stay public.
+      </p>
       <form method="post" action="{{ url_for('admin_login') }}">
 {% include "_csrf.html" %}
         <input type="hidden" name="next" value="{{ next }}">

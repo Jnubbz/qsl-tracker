@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Card requests -- QSL Tracker{% endblock %}
+{% block content %}
+  <section class="card">
+    <h1>Card requests</h1>
+    <p class="muted">
+      Submitted from Request a Card. A mailing address is whatever the
+      operator typed. Email is only so you can reach them.
+    </p>
+
+    {% if requests %}
+      <ul class="request-list">
+        {% for req in requests %}
+          <li class="request-entry">
+            <div class="dashboard-top">
+              <h2>{{ req.callsign }}</h2>
+              <span class="muted">{{ req.created_at | utc_time }}</span>
+            </div>
+            {% if req.address %}
+              <p class="request-address">{{ req.address }}</p>
+            {% else %}
+              <p class="muted">No mailing address given.</p>
+            {% endif %}
+            {% if req.note %}
+              <p>Note: {{ req.note }}</p>
+            {% endif %}
+            {% if req.contact_email %}
+              <p>Email: <a href="mailto:{{ req.contact_email }}">{{ req.contact_email }}</a>
+                <span class="muted">so you can reach them</span></p>
+            {% else %}
+              <p class="muted">No email given.</p>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">No card requests yet.</p>
+    {% endif %}
+  </section>
+{% endblock %}

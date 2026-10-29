@@ -1,15 +1,8 @@
 {% extends "base.html" %}
-{% block title %}Raw Address Ripper{% endblock %}
+{% block title %}ADIF Address Extractor -- QSL Tracker{% endblock %}
 {% block content %}
   <section class="card">
-    <div class="dashboard-top">
-      <h1>Raw Address Ripper</h1>
-      <p>Logged in to QRZ as <strong>{{ qrz_username }}</strong>.</p>
-      <form method="post" action="{{ url_for('logout') }}">
-{% include "_csrf.html" %}
-        <button type="submit" class="link-button">Log out</button>
-      </form>
-    </div>
+    <h1>ADIF Address Extractor</h1>
     <p class="muted">
       Look up a callsign against QRZ and get whatever mailing address is on
       file &mdash; <strong>regardless of whether they've marked it available
@@ -26,7 +19,7 @@
   </section>
 
   <section class="card">
-    <h1>Bulk-add from your ADIF log</h1>
+    <h2>Bulk-add from your ADIF log</h2>
     <p class="muted">
       Upload an ADIF (.adi/.adif) export from your own logging software and
       every distinct callsign in it gets a raw QRZ lookup, added straight to
@@ -41,12 +34,12 @@
 {% include "_csrf.html" %}
       <label for="adif_file">ADIF file</label>
       <input type="file" id="adif_file" name="adif_file" accept=".adi,.adif,text/plain" required>
-      <button type="submit">Rip addresses from this log</button>
+      <button type="submit">Extract addresses from this log</button>
     </form>
   </section>
 
   <section class="card">
-    <h1>Or look up one callsign</h1>
+    <h2>Look up one callsign</h2>
     <form method="get" action="{{ url_for('raw_address') }}" id="raw-address-form">
       <label for="callsign">Callsign</label>
       <input type="text" id="callsign" name="callsign" value="{{ callsign }}" placeholder="e.g. W1AW" required>
@@ -70,54 +63,55 @@
 
   {% if batch %}
     <section class="card">
-      <h1>Batch ({{ batch | length }} of {{ label_count }})</h1>
+      <h2>Batch ({{ batch | length }} of {{ label_count }})</h2>
       <p class="muted">
         Everything below prints together on one sheet, each at its own
         position &mdash; nothing else on the sheet is touched. Addresses
         are re-fetched from QRZ fresh at print time, never saved anywhere.
       </p>
-      <table class="contacts">
-        <thead>
-          <tr><th>Position</th><th>Callsign</th><th>Name</th><th></th></tr>
-        </thead>
-        <tbody>
-          {% for b in batch | sort(attribute='position') %}
-            <tr>
-              <td>{{ b.position }}</td>
-              <td>{{ b.callsign }}</td>
-              <td>{{ b.name or '-' }}</td>
-              <td>
-                <form method="post" action="{{ url_for('raw_address_batch_remove') }}" style="display: inline;">
+      <div class="table-scroll">
+        <table class="contacts">
+          <thead>
+            <tr><th>Position</th><th>Callsign</th><th>Name</th><th></th></tr>
+          </thead>
+          <tbody>
+            {% for b in batch | sort(attribute='position') %}
+              <tr>
+                <td>{{ b.position }}</td>
+                <td>{{ b.callsign }}</td>
+                <td>{{ b.name or '-' }}</td>
+                <td>
+                  <form method="post" action="{{ url_for('raw_address_batch_remove') }}" class="inline-form">
 {% include "_csrf.html" %}
-                  <input type="hidden" name="position" value="{{ b.position }}">
-                  <button type="submit" class="link-button">Remove</button>
-                </form>
-              </td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      <p style="margin-top: 1rem;">
+                    <input type="hidden" name="position" value="{{ b.position }}">
+                    <button type="submit" class="link-button">Remove</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="button-row" style="margin-top: 1rem;">
         <a class="button-link" href="{{ url_for('raw_address_batch_pdf') }}" target="_blank" rel="noopener">Download batch PDF ({{ batch | length }} label{{ 's' if batch | length != 1 else '' }})</a>
-        &nbsp;
-        <form method="post" action="{{ url_for('raw_address_batch_clear') }}" style="display: inline;">
+        <form method="post" action="{{ url_for('raw_address_batch_clear') }}" class="inline-form">
 {% include "_csrf.html" %}
           <button type="submit" class="link-button">Clear batch</button>
         </form>
-      </p>
+      </div>
     </section>
   {% endif %}
 
   {% if record %}
     <section class="card">
-      <h1>Preview</h1>
+      <h2>Preview</h2>
       {% if not record.accepts_direct %}
         <p class="muted">
           Heads up: QRZ doesn't have {{ record.callsign }} marked as
           accepting a direct card
           {%- if record.qsl_via %} &mdash; their QRZ page lists a QSL
           note/manager: &ldquo;{{ record.qsl_via }}&rdquo;{% endif %}.
-          Raw Address Ripper shows the address on file anyway &mdash;
+          ADIF Address Extractor shows the address on file anyway &mdash;
           worth a second look before mailing if that matters for this one.
         </p>
       {% endif %}

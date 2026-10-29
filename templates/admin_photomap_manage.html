@@ -1,26 +1,18 @@
 {% extends "base.html" %}
-{% block title %}Manage cards -- QSL Photo Map{% endblock %}
+{% import "macros.html" as ui %}
+{% block title %}QSL Cards -- QSL Tracker{% endblock %}
 {% block content %}
   <section class="card">
-    <div class="dashboard-top">
-      <h1>QSL cards</h1>
-      <form method="post" action="{{ url_for('admin_logout') }}">
-{% include "_csrf.html" %}
-        <button type="submit" class="link-button">Log out (admin)</button>
-      </form>
-    </div>
-    <p class="results-actions">
-      <a class="button-link" href="{{ url_for('admin_photomap_upload') }}">Upload a card</a>
-      <a class="button-link" href="{{ url_for('admin_log') }}">Your log (sync / import)</a>
-      <a href="{{ url_for('photomap') }}">View the public map</a>
-    </p>
+    <h1>QSL Cards</h1>
+    {{ ui.cards_tabs('manage') }}
     <p class="muted">
       Every card that's been uploaded. Anything flagged below still shows up on
-      the public map -- it just displays as incomplete (no photo, or no QSO
+      the QSL Photo Map -- it just displays as incomplete (no photo, or no QSO
       details) until fixed here.
     </p>
 
     {% if cards %}
+      <div class="table-scroll">
       <table class="contacts">
         <thead>
           <tr><th>Callsign</th><th>Date</th><th>Band / Mode</th><th>Photos</th><th>Note</th><th></th></tr>
@@ -59,6 +51,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% else %}
       <p class="muted">No cards uploaded yet.</p>
     {% endif %}

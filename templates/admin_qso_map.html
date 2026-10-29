@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}QSO Map{% endblock %}
+{% block title %}QSO Map -- QSL Tracker{% endblock %}
 
 {% block extra_head %}
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -38,7 +38,7 @@
     <section class="card qmap-batch">
       <span>Label sheet: <strong>{{ batch | length }} of {{ label_count }}</strong> positions used.</span>
       <a class="button-link" href="{{ url_for('admin_qso_label_batch_pdf') }}" target="_blank" rel="noopener">Download PDF</a>
-      <a href="{{ url_for('admin_qso_label') }}">Review / remove on QSO Labels</a>
+      <a href="{{ url_for('admin_qso_label') }}">Review on QSO Labels</a>
     </section>
   {% endif %}
 
@@ -66,8 +66,8 @@
     </form>
   </section>
 
-  {# Per-row "Address" buttons post this form (one shared form, the
-     callsign filled in on click) into the Raw Address Ripper batch. #}
+  {# Per-row "Extract address" buttons post this form (one shared form, the
+     callsign filled in on click) into the ADIF Address Extractor batch. #}
   {% if has_qrz_session %}
     <form method="post" action="{{ url_for('raw_address_batch_add') }}" id="qmap-address-form" hidden>
 {% include "_csrf.html" %}
@@ -331,7 +331,7 @@
           pv.href = PREVIEW + '?callsign=' + encodeURIComponent(q.callsign) + '&qso_key=' + q.id;
           act.appendChild(pv);
           if (HAS_QRZ) {
-            var ab = el('button', 'Address', 'link-button'); ab.type = 'button';
+            var ab = el('button', 'Extract address', 'link-button'); ab.type = 'button';
             ab.addEventListener('click', function () {
               document.getElementById('qmap-address-callsign').value = q.callsign;
               document.getElementById('qmap-address-form').submit();

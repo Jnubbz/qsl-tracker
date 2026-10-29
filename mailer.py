@@ -53,13 +53,23 @@ def _clean(text) -> str:
     return " ".join(str(text or "").split())
 
 
-def send_qsl_request_email(callsign: str, note: str, contact_email: str) -> bool:
+def _address_text(address) -> str:
+    """Keep the visitor's line breaks (street, city, postal code, country)
+    but collapse spaces inside each line. The address is body text only --
+    it is never copied into a header."""
+    text = str(address or "").replace("\r\n", "\n").replace("\r", "\n")
+    lines = [" ".join(line.split()) for line in text.split("\n")]
+    return "\n".join(line for line in lines if line)[:500]
+
+
+def send_qsl_request_email(callsign: str, note: str, contact_email: str, address: str = "") -> bool:
     """Send Josh a notification email for a QSL card request via the
     Resend HTTP API.
 
-    Returns True if the API accepted the email, False if it was skipped
-    (missing config) or the request failed outright. Never raises -- a
-    broken mail setup should never break the visitor-facing form.
+    `contact_email` is included in the body so he can reach the operator.
+    It is not set as Reply-To. Returns True if the API accepted the email,
+    False if it was skipped (missing config) or the request failed outright.
+    Never raises -- a broken mail setup should never break the visitor-facing form.
     """
     api_key = os.environ.get("RESEND_API_KEY")
     notify_email = os.environ.get("NOTIFY_EMAIL")
@@ -76,14 +86,20 @@ def send_qsl_request_email(callsign: str, note: str, contact_email: str) -> bool
     callsign = _clean(callsign)[:20]
     note = _clean(note)[:500]
     contact_email = _clean(contact_email)[:200]
+    address = _address_text(address)
 
     body_lines = [f"Callsign: {callsign or '(not given)'}"]
+    if address:
+        body_lines.append("Mailing address:")
+        body_lines.append(address)
+    else:
+        body_lines.append("Mailing address: (not given)")
     if contact_email:
-        body_lines.append(f"Their email: {contact_email}")
+        body_lines.append(f"Email (so you can reach them): {contact_email}")
     if note:
         body_lines.append(f"Note: {note}")
     body_lines.append("")
-    body_lines.append('Sent from the "Request a QSL Card" form on kn0ble.com.')
+    body_lines.append('Sent from the "Request a Card" form on kn0ble.com.')
 
     payload = {
         "from": DEFAULT_FROM,
@@ -91,8 +107,6 @@ def send_qsl_request_email(callsign: str, note: str, contact_email: str) -> bool
         "subject": f"QSL card request from {callsign or 'unknown callsign'}",
         "text": "\n".join(body_lines),
     }
-    if contact_email:
-        payload["reply_to"] = contact_email
 
     try:
         resp = requests.post(

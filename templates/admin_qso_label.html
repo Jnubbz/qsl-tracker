@@ -1,38 +1,31 @@
 {% extends "base.html" %}
-{% block title %}QSO Labels{% endblock %}
+{% block title %}QSO Labels -- QSL Tracker{% endblock %}
 {% block content %}
   <section class="card">
-    <div class="dashboard-top">
-      <h1>QSO Labels</h1>
-      <form method="post" action="{{ url_for('admin_logout') }}">
-{% include "_csrf.html" %}
-        <button type="submit" class="link-button">Log out (admin)</button>
-      </form>
-    </div>
+    <h1>QSO Labels</h1>
     <p class="muted">
       Print your logged QSO details (callsign, UTC date/time, band, mode,
       freq, grid, RST) on Avery 5163 / 8163 / 18163 labels (2"&times;4",
       10 per sheet) to stick on the card. Check QSOs to batch them, or
-      Preview one to pick its exact sheet position. "Address" drops that
-      station into your
-      <a href="{{ url_for('raw_address') }}">Raw Address Ripper</a> batch
-      for the envelope.
+      Preview one to pick its exact sheet position. Extract address adds
+      that station to your
+      <a href="{{ url_for('raw_address') }}">ADIF Address Extractor</a> batch
+      for the envelope. Pick countries on the
+      <a href="{{ url_for('admin_qso_map') }}">QSO Map</a>.
     </p>
 
     <div class="results-actions">
       <span class="muted">
-        {{ total_qsos }} QSO{{ 's' if total_qsos != 1 else '' }} in your log
+        <a href="{{ url_for('admin_log') }}">{{ total_qsos }} QSO{{ 's' if total_qsos != 1 else '' }} in the Logbook</a>
         {%- if sync_state.get('last_sync') %} &middot; last QRZ sync {{ sync_state.last_sync | utc_time }}{% endif %}.
       </span>
       {% if logbook_configured %}
-        <form method="post" action="{{ url_for('admin_log_sync') }}" style="display: inline;">
+        <form method="post" action="{{ url_for('admin_log_sync') }}" class="inline-form">
 {% include "_csrf.html" %}
           <input type="hidden" name="next" value="{{ self_url }}">
           <button type="submit">Sync from QRZ</button>
         </form>
       {% endif %}
-      <a href="{{ url_for('admin_log') }}">Your log</a>
-      <a href="{{ url_for('admin_qso_map') }}">Pick from the map</a>
     </div>
 
     <form method="get" action="{{ url_for('admin_qso_label') }}" id="qso-filter-form">
@@ -56,7 +49,7 @@
 
   {% if qso %}
     <section class="card">
-      <h1>Preview</h1>
+      <h2>Preview</h2>
       <div class="label-preview label-preview--5163">
         <p class="qso-preview-header">{{ qso_fields.header }}</p>
         {% if qso_fields.subheader %}
@@ -120,11 +113,12 @@
 
   {% if batch %}
     <section class="card">
-      <h1>Batch ({{ batch | length }} of {{ label_count }})</h1>
+      <h2>Batch ({{ batch | length }} of {{ label_count }})</h2>
       <p class="muted">
         Everything below prints together on one sheet, each at its own
         position &mdash; nothing else on the sheet is touched.
       </p>
+      <div class="table-scroll">
       <table class="contacts">
         <thead>
           <tr><th>Position</th><th>Callsign</th><th>Date</th><th></th></tr>
@@ -147,19 +141,20 @@
           {% endfor %}
         </tbody>
       </table>
-      <p style="margin-top: 1rem;">
+      </div>
+      <div class="button-row" style="margin-top: 1rem;">
         <a class="button-link" href="{{ url_for('admin_qso_label_batch_pdf') }}" target="_blank" rel="noopener">Download batch PDF ({{ batch | length }} label{{ 's' if batch | length != 1 else '' }})</a>
         &nbsp;
         <a class="button-link" href="{{ url_for('admin_qso_batch_card_pdf') }}" target="_blank" rel="noopener">Print on the cards ({{ batch | length }} card{{ 's' if batch | length != 1 else '' }})</a>
         &nbsp;
         <a href="{{ url_for('admin_qso_batch_card_pdf', proof=1) }}" target="_blank" rel="noopener">Proof</a>
         &nbsp;
-        <form method="post" action="{{ url_for('admin_qso_label_batch_clear') }}" style="display: inline;">
+        <form method="post" action="{{ url_for('admin_qso_label_batch_clear') }}" class="inline-form">
 {% include "_csrf.html" %}
           <input type="hidden" name="next" value="{{ self_url }}">
           <button type="submit" class="link-button">Clear batch</button>
         </form>
-      </p>
+      </div>
     </section>
   {% endif %}
 
@@ -194,18 +189,18 @@
     <section class="card">
       <p class="muted">
         {{ address_batch_count }} of {{ mailing_label_count }} addresses in your
-        Raw Address Ripper batch &mdash;
-        <a href="{{ url_for('raw_address') }}">open it to print the envelope labels</a>.
+        ADIF Address Extractor batch &mdash;
+        <a href="{{ url_for('raw_address') }}">open ADIF Address Extractor to print them</a>.
       </p>
     </section>
   {% endif %}
 
   <section class="card">
-    <h1>
+    <h2>
       {{ row_count }} logged QSO{{ 's' if row_count != 1 else '' }}
       {% if callsign %}matching &ldquo;{{ callsign }}&rdquo;{% endif %}
       {% if entity %}from {{ entity }}{% endif %}
-    </h1>
+    </h2>
     <form method="get" action="{{ url_for('admin_qso_label') }}" class="qso-show-form">
       {% if callsign %}<input type="hidden" name="callsign" value="{{ callsign }}">{% endif %}
       {% if entity %}<input type="hidden" name="entity" value="{{ entity }}">{% endif %}
@@ -227,6 +222,7 @@
 {% include "_csrf.html" %}
         <input type="hidden" name="next" value="{{ self_url }}">
       </form>
+      <div class="table-scroll">
       <table class="contacts">
         <thead>
           <tr>
@@ -260,7 +256,7 @@
 {% include "_csrf.html" %}
                     <input type="hidden" name="callsign" value="{{ q['callsign'] }}">
                     <input type="hidden" name="next" value="{{ self_url }}">
-                    <button type="submit" class="link-button">Address</button>
+                    <button type="submit" class="link-button">Extract address</button>
                   </form>
                 {% endif %}
               </td>
@@ -268,6 +264,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
       <p style="margin-top: 1rem;">
         {% if batch_full %}
           <span class="muted">Batch full ({{ label_count }} of {{ label_count }}) &mdash; download or remove some above to add more.</span>
@@ -281,7 +278,7 @@
         {% if total_qsos %}
           No logged QSOs match this filter.
         {% else %}
-          Your log is empty here &mdash; <a href="{{ url_for('admin_log') }}">sync it from QRZ or import an ADIF file</a>.
+          The Logbook is empty &mdash; <a href="{{ url_for('admin_log') }}">sync it from QRZ or import an ADIF file</a>.
         {% endif %}
       </p>
     {% endif %}

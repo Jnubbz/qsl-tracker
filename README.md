@@ -1,33 +1,61 @@
 # QSL Tracker
 
-A small Flask app for hams, part of [KN0BLE.com](https://kn0ble.com):
+A small Flask app for hams, part of [KN0BLE.com](https://kn0ble.com).
 
-- **Raw Address Ripper** (`/raw-address`, public) -- log in with your own
-  QRZ XML subscriber account, look up one callsign or upload an ADIF log,
-  and print the mailing addresses QRZ has on file onto Avery 8160 labels.
-  Shows a heads-up when a station has opted out of paper cards or lists
-  a QSL manager. Nothing looked up or uploaded is stored.
-- **QSO Labels** (`/admin/qso-label`, admin) -- your own logged QSOs,
-  filterable by callsign or DXCC entity, printed onto Avery 5163 labels
-  to stick on the card, or printed **straight onto the 6"x4" QSL card** ("Print on the card"):
+**QSL Tracker** is the site name. Each tool has one name, used in the
+navigation, the page title, and the heading:
+
+| Tool | Who | Path |
+| --- | --- | --- |
+| ADIF Address Extractor | public (QRZ login) | `/raw-address` |
+| QSL Photo Map | public | `/photomap` |
+| Request a Card | public, no login | `/request-qsl` |
+| Logbook | admin | `/admin/log` |
+| QSO Labels | admin | `/admin/qso-label` |
+| QSO Map | admin | `/admin/qso-map` |
+| QSL Cards | admin | `/admin/photomap/manage` |
+| Card requests | admin | `/admin/requests` |
+
+Visitors see ADIF Address Extractor, QSL Photo Map, Request a Card, and Admin.
+After admin log in, the nav adds Logbook, QSO Labels, QSO Map, QSL
+Cards, and Card requests, and keeps the public pages in a second group.
+Log out of QRZ and log out of admin are separate, in the header.
+
+- **ADIF Address Extractor** -- log in with your own QRZ XML subscriber account,
+  look up one callsign or upload an ADIF log, and print the mailing
+  addresses QRZ has on file onto Avery 8160 labels. Shows a heads-up
+  when a station has opted out of paper cards or lists a QSL manager.
+  Nothing looked up or uploaded is stored.
+- **QSL Photo Map** -- scanned QSL cards on a public world map.
+- **Request a Card** -- someone worked KN0BLE and wants a card mailed
+  back. No QRZ login. Details under "Email notifications" below.
+- **Logbook** -- the copy of your log behind QSO Labels and QSL Cards
+  auto-fill. One page, three tasks: **Sync from QRZ**, **Find missing
+  QSOs**, and **Import ADIF**. Counts (this log, QRZ's total, last sync,
+  anything not matched) stay at the top. "Not matched" links straight
+  to Find missing QSOs. Filled by the QRZ Logbook API or an ADIF upload.
+  The old import URL `/admin/photomap/import-adif` opens Import ADIF.
+- **QSO Labels** -- your own logged QSOs, filterable by callsign or
+  DXCC entity, printed onto Avery 5163 labels to stick on the card, or
+  printed **straight onto the 6"x4" QSL card** ("Print on the card"):
   one 6x4 page per QSO, the same details grid placed in the blank
   lower-left of the card back. "Proof" draws it over a scan of the card
   (`static/card/qsl_card_back.jpg`) for checking on screen; a saved
   right/down nudge corrects for where the printer actually lands it.
-- **QSO Map** (`/admin/qso-map`, admin) -- a world map of your log by
-  DXCC entity, shaded by QSO count. Click a country (or a small island's
-  dot) to list its QSOs, check some, and add them to the QSO Labels
-  sheet. Map outlines are Natural Earth 1:50m map subunits (public
-  domain), which already split out most separate DXCC entities (Alaska,
-  Hawaii, England/Scotland/Wales, European/Asiatic Russia, Canary
-  Islands, Sardinia ...); entity reference points come from AD1C's
-  cty.dat. Both are pre-built into `static/qso_map/areas.geojson` and
-  `qso_map_entities.json` by `tools/build_qso_map.py` (run by hand only
-  to refresh them; the app never fetches anything).
-- **QSL Cards / Photo Map** -- admin upload of scanned cards, shown on
-  the public `/photomap`.
-- **Your log** (`/admin/log`, admin) -- the copy of your log behind QSO
-  Labels, filled by "Sync from QRZ" (QRZ Logbook API) or an ADIF upload.
+  Extract address on a row adds that station to the ADIF Address Extractor batch.
+- **QSO Map** -- a world map of your log by DXCC entity, shaded by QSO
+  count. Click a country (or a small island's dot) to list its QSOs,
+  check some, and add them to the QSO Labels sheet. Map outlines are
+  Natural Earth 1:50m map subunits (public domain), which already split
+  out most separate DXCC entities (Alaska, Hawaii, England/Scotland/Wales,
+  European/Asiatic Russia, Canary Islands, Sardinia ...); entity
+  reference points come from AD1C's cty.dat. Both are pre-built into
+  `static/qso_map/areas.geojson` and `qso_map_entities.json` by
+  `tools/build_qso_map.py` (run by hand only to refresh them; the app
+  never fetches anything).
+- **QSL Cards** -- admin upload and edit of scanned cards shown on the
+  QSL Photo Map. All cards and Upload are the two sections;
+  `/admin/photomap/upload` is Upload.
 
 ## How it works
 
@@ -36,7 +64,7 @@ A small Flask app for hams, part of [KN0BLE.com](https://kn0ble.com):
   password, used once to fetch a short-lived QRZ session key; the
   password is never stored and the key lives server-side in SQLite,
   keyed by the anonymous session id.
-- Ripper ADIF uploads are capped at 200 distinct callsigns, paced
+- ADIF Address Extractor uploads are capped at 200 distinct callsigns, paced
   between QRZ requests, and stop early (with a clear message) on a long
   request or repeated QRZ failures. Any upload (ADIF or card photo) is
   also capped at 8 MB.
@@ -59,11 +87,16 @@ A small Flask app for hams, part of [KN0BLE.com](https://kn0ble.com):
   login needed) for the reverse case: someone worked KN0BLE and wants a
   card mailed back to *them*. It's embedded directly on kn0ble.com
   (index and awards pages) via a plain HTML `<form>` posting here, and
-  also reachable directly. On submit it's saved to a `qsl_requests`
-  table and, if Resend is configured (see below), emailed straight to
-  Josh with the callsign, optional note, and optional contact email so
-  he can look the callsign up here the normal way and mail a card. A
-  hidden honeypot field and a light per-session rate limit (3 requests /
+  also reachable directly. Callsign is required. Note, mailing address
+  (`address`: street, city, postal code, country, up to 500 characters),
+  and email are optional. The email is only so Josh can reach the
+  operator; it is stored and shown on Card requests, and it is included
+  in the notification body, but it is **not** set as Reply-To. On submit
+  the request is saved to `qsl_requests` (an `address` column is added
+  for databases created before that field existed) and, if Resend is
+  configured (see below), emailed to Josh. Admin reads them at
+  `/admin/requests`. A hidden honeypot (`hp_url`, and the older field
+  name `website`) and a light per-session rate limit (3 requests /
   10 minutes) guard against bots and spam. This form is the one POST
   exempt from the CSRF token, because the copy embedded on kn0ble.com
   is plain HTML and cannot carry a token minted here. The session
@@ -230,16 +263,18 @@ Uploading is admin-only (just Josh) -- there's no public upload:
   `ADMIN_PASSWORD` env var. Separate from the QRZ login system the rest
   of the app uses (that's per-visitor and anonymous; this is one
   person's admin area).
-- `/admin/log` -- sync your QRZ Logbook or upload an ADIF log so the
-  upload form below can auto-fill QSO details (date/band/mode/frequency/
-  RST) for a callsign instead of typing them by hand. Safe to mix and
-  repeat -- duplicates are skipped.
-- `/admin/photomap/upload` -- pick a callsign, attach one or more
-  front-of-card photos, fill in (or accept the auto-filled) QSO details,
-  save. A callsign's map location (country/state/grid/lat-lon) is looked
-  up from QRZ the first time it's uploaded and cached from then on --
-  requires being logged in with your QRZ credentials (same login as the
-  rest of the app) the first time a given callsign is used.
+- `/admin/log` (Logbook) -- Sync from QRZ, Find missing QSOs, or Import
+  ADIF, so the QSL Cards upload form can auto-fill QSO details
+  (date/band/mode/frequency/RST) for a callsign instead of typing them
+  by hand. Safe to mix and repeat -- duplicates are skipped.
+- `/admin/photomap/upload` (QSL Cards, Upload) -- pick a callsign,
+  attach one or more front-of-card photos, fill in (or accept the
+  auto-filled) QSO details, save. A callsign's map location
+  (country/state/grid/lat-lon) is looked up from QRZ the first time it's
+  uploaded and cached from then on -- requires being logged in with your
+  QRZ credentials (same login as the rest of the app) the first time a
+  given callsign is used. Cards already uploaded are listed and edited
+  from `/admin/photomap/manage`.
 
 Photos are stored in a private S3 bucket and relayed straight through the
 Flask app both ways: on upload (a normal multipart form post, not a
@@ -331,10 +366,10 @@ Early / brainstorming-to-working-prototype stage. Next up:
 - [x] Server-side session store for the QRZ session key -- it now lives
       in SQLite (`auth_sessions`, keyed by the anonymous session id) and
       the cookie only ever carries that id, never the key itself
-- [x] Print-ready mailing labels -- the Raw Address Ripper (replaced the
+- [x] Print-ready mailing labels -- ADIF Address Extractor (replaced the
       old Dashboard + CSV export on 2026-10-04)
 - [x] QRZ Logbook sync for QSO labels (AFTERLOGID paging, 2026-10-04)
-- [x] "Request a QSL Card" -- public form (embedded on kn0ble.com) for
+- [x] "Request a Card" -- public form (embedded on kn0ble.com) for
       visitors to request a card back, emailed to Josh via Gmail SMTP
       (see "Email notifications" above)
 - [x] QSL Photo Map -- public `/photomap` (world map of scanned cards)

@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS qsl_requests (
     callsign TEXT NOT NULL,
     note TEXT,
     contact_email TEXT,
+    address TEXT,
     created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_qsl_requests_session ON qsl_requests(session_id);
@@ -70,6 +71,12 @@ def get_conn():
 def init_db() -> None:
     with get_conn() as conn:
         conn.executescript(SCHEMA)
+        # Databases created before the mailing-address field existed
+        # still have the old qsl_requests columns. CREATE TABLE IF NOT
+        # EXISTS will not add a column to those files.
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(qsl_requests)")}
+        if "address" not in cols:
+            conn.execute("ALTER TABLE qsl_requests ADD COLUMN address TEXT")
 
 
 def purge_expired() -> None:
@@ -114,15 +121,32 @@ def clear_auth(session_id: str) -> None:
         conn.execute("DELETE FROM auth_sessions WHERE session_id = ?", (session_id,))
 
 
-def save_qsl_request(session_id: str, callsign: str, note: str, contact_email: str) -> None:
+def save_qsl_request(
+    session_id: str, callsign: str, note: str, contact_email: str, address: str = ""
+) -> None:
+    """Save one card request. `contact_email` is how to reach the operator,
+    not a reply address. `address` is the optional mailing address they typed."""
     with get_conn() as conn:
         conn.execute(
             """
-            INSERT INTO qsl_requests (session_id, callsign, note, contact_email, created_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO qsl_requests (session_id, callsign, note, contact_email, address, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (session_id, callsign, note, contact_email, time.time()),
+            (session_id, callsign, note, contact_email, address, time.time()),
         )
+
+
+def list_qsl_requests() -> list[dict]:
+    """Every saved card request, newest first, for the admin list."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, callsign, note, contact_email, address, created_at
+            FROM qsl_requests
+            ORDER BY created_at DESC, id DESC
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def count_recent_qsl_requests(session_id: str, window_seconds: int) -> int:

@@ -1,29 +1,35 @@
 {% extends "base.html" %}
-{% block title %}Request a QSL Card -- QSL Tracker{% endblock %}
+{% block title %}Request a Card -- QSL Tracker{% endblock %}
 {% block content %}
   <section class="card">
-    <h1>Request a QSL card</h1>
+    <h1>Request a Card</h1>
     <p>
-      Worked KN0BLE and want a card back? Send your callsign below and
-      I'll look you up and get one in the mail.
+      Worked KN0BLE and want a card back? Send a callsign and one will
+      get mailed out. A mailing address is optional &mdash; include it if
+      you already know where the card should go. Email is optional too,
+      and only so I can reach you if I need to.
     </p>
     <form method="post" action="{{ url_for('request_qsl') }}">
 {% include "_csrf.html" %}
       <label for="callsign">Your callsign</label>
-      <input type="text" id="callsign" name="callsign" maxlength="20" required autocomplete="off">
+      <input type="text" id="callsign" name="callsign" maxlength="20" required autocomplete="off" autocapitalize="characters" spellcheck="false">
 
       <label for="note">Note (optional)</label>
-      <input type="text" id="note" name="note" maxlength="200" placeholder="e.g. worked you on 20m CW, Aug 2026">
+      <input type="text" id="note" name="note" maxlength="200" placeholder="e.g. worked you on 20m CW">
 
-      <label for="email">Your email (optional)</label>
+      <label for="address">Mailing address (optional)</label>
+      <textarea id="address" name="address" maxlength="500" rows="3" autocomplete="off" placeholder="Street, city, postal code, country"></textarea>
+
+      <label for="email">Email (optional)</label>
+      <p class="field-hint">Only so I can reach you if I need to.</p>
       <input type="email" id="email" name="email" maxlength="200" autocomplete="email">
 
       <div class="hp-field" aria-hidden="true">
-        <label for="website">Leave this field empty</label>
-        <input type="text" id="website" name="website" tabindex="-1" autocomplete="off">
+        <label for="hp_url">Leave this field empty</label>
+        <input type="text" id="hp_url" name="hp_url" tabindex="-1" autocomplete="off">
       </div>
 
-      <button type="submit">Request a QSL Card</button>
+      <button type="submit">Request a Card</button>
     </form>
   </section>
 {% endblock %}
