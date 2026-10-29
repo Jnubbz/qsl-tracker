@@ -1,8 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Log in -- QSL Tracker{% endblock %}
+{% import "macros.html" as ui %}
+{% block title %}ADIF Address Extractor -- QSL Tracker{% endblock %}
 {% block content %}
   <section class="card">
-    <h1>Raw Address Ripper</h1>
+    <h1>ADIF Address Extractor</h1>
     <p>
       Pull mailing addresses from QRZ for the stations you need to QSL,
       one callsign at a time or a whole ADIF log at once, and print them
@@ -11,17 +12,11 @@
     <p class="muted">
       Uses the QRZ.com XML Data API, which needs a QRZ XML subscription.
       Your password is only used to get a temporary session key from QRZ
-      and is never stored. Just here for the cards?
-      <a href="{{ url_for('photomap') }}">See the QSL Photo Map</a>.
+      and is never stored.
     </p>
     <form method="post" action="{{ url_for('login') }}">
 {% include "_csrf.html" %}
-      <label for="qrz_username">QRZ username</label>
-      <input type="text" id="qrz_username" name="qrz_username" autocomplete="username" required>
-
-      <label for="qrz_password">QRZ password</label>
-      <input type="password" id="qrz_password" name="qrz_password" autocomplete="current-password" required>
-
+      {{ ui.qrz_login_fields() }}
       <button type="submit">Log in</button>
     </form>
   </section>

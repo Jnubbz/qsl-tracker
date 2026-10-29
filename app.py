@@ -158,6 +158,26 @@ QRZ_SYNC_RECENT_DAYS = 7
 QSO_TABLE_SHOW_OPTIONS = (25, 50, 100, 200)
 QSO_TABLE_ROW_CAP = 25
 
+# Logbook page sections. The route stays /admin/log; `section` only
+# chooses which task (sync, find missing, import) is on screen.
+LOG_SECTIONS = ("sync", "missing", "import")
+
+
+@app.context_processor
+def inject_nav():
+    """Who is signed in, for the shared header. Read-only: it does not
+    create a session or touch QRZ."""
+    username = None
+    session_id = session.get("session_id")
+    if session_id:
+        auth = db.get_auth(session_id)
+        if auth:
+            username = auth["qrz_username"]
+    return {
+        "nav_qrz_username": username,
+        "nav_is_admin": bool(session.get("is_admin")),
+    }
+
 
 @app.template_filter("utc_time")
 def utc_time(ts) -> str:
@@ -322,7 +342,7 @@ def dashboard():
 
 @app.route("/raw-address")
 def raw_address():
-    """Raw Address Ripper -- the app's one mailing-address tool (since
+    """ADIF Address Extractor -- the app's one mailing-address tool (since
     2026-10-04, when it replaced the old Dashboard and both admin
     address pages). Any visitor logged in with their own QRZ XML
     subscriber account looks up one callsign or bulk-uploads an ADIF log
@@ -526,7 +546,7 @@ def raw_address_batch_pdf():
 
 @app.route("/raw-address/adif-batch", methods=["POST"])
 def raw_address_adif_batch():
-    """Public ADIF bulk-upload for Raw Address Ripper: any logged-in
+    """Public ADIF bulk-upload for ADIF Address Extractor: any logged-in
     visitor uploads their own log and every distinct callsign in it
     (capped at MAX_LOOKUPS_PER_UPLOAD) gets a raw QRZ lookup, added
     straight to their own batch. Paced and circuit-broken
@@ -648,7 +668,9 @@ def request_qsl():
         # A bot that fills every field trips this -- pretend success
         # without sending an email or storing anything, so it doesn't
         # even learn the trick failed.
-        if request.form.get("website"):
+        # kn0ble.com posts the honeypot as hp_url. This app's older form
+        # used website. Either one being filled is a bot (or autofill).
+        if request.form.get("website") or request.form.get("hp_url"):
             logger.warning(
                 "QSL request dropped -- honeypot field was filled (likely a bot, "
                 "or a password manager / autofill extension filling a hidden field)"
@@ -658,6 +680,7 @@ def request_qsl():
         callsign = request.form.get("callsign", "").strip().upper()[:20]
         note = request.form.get("note", "").strip()[:500]
         contact_email = request.form.get("email", "").strip()[:200]
+        address = request.form.get("address", "").replace("\r\n", "\n").replace("\r", "\n").strip()[:500]
 
         if not callsign:
             flash("Enter a callsign so I know who to send a card to.", "error")
@@ -668,9 +691,9 @@ def request_qsl():
             flash("Too many requests from this browser recently -- try again later.", "error")
             return redirect(url_for("request_qsl"))
 
-        db.save_qsl_request(session_id, callsign, note, contact_email)
+        db.save_qsl_request(session_id, callsign, note, contact_email, address)
         logger.info("QSL request saved for callsign %s, sending notification email...", callsign)
-        send_qsl_request_email(callsign, note, contact_email)
+        send_qsl_request_email(callsign, note, contact_email, address)
         return redirect(url_for("request_qsl_thanks"))
 
     return render_template("request_qsl.html")
@@ -679,6 +702,15 @@ def request_qsl():
 @app.route("/request-qsl/thanks")
 def request_qsl_thanks():
     return render_template("request_qsl_thanks.html")
+
+
+@app.route("/admin/requests")
+@admin_required
+def admin_requests():
+    """Card requests saved from /request-qsl, including an optional
+    mailing address. The contact email is shown so Josh can reach the
+    operator; it is not a reply-to address."""
+    return render_template("admin_requests.html", requests=db.list_qsl_requests())
 
 
 # ---------------------------------------------------------------------
@@ -825,7 +857,7 @@ def admin_qso_label():
     filterable by callsign (substring) and/or DXCC entity, with
     checkbox multi-select into the batch, a per-row "Preview" (which
     also allows a hand-picked sheet position), and a per-row "Address"
-    button that drops that station into the Raw Address Ripper batch.
+    button that drops that station into the ADIF Address Extractor batch.
 
     The log itself comes from photomap_store -- filled by "Sync from
     QRZ" or an ADIF upload on the log page (admin_log())."""
@@ -1276,8 +1308,11 @@ def admin_qsos():
     ))
 
 
-@app.route("/admin/log", methods=["GET", "POST"])
+# /admin/log is listed second so url_for("admin_log") builds that path.
+# Flask builds with the first rule registered, and the decorator closest
+# to the function runs first. The older import URL stays as an alias.
 @app.route("/admin/photomap/import-adif", methods=["GET", "POST"])
+@app.route("/admin/log", methods=["GET", "POST"])
 @admin_required
 def admin_log():
     """Josh's own log, as the app sees it -- the data behind QSO Labels
@@ -1289,29 +1324,41 @@ def admin_log():
         file = request.files.get("adif_file")
         if not file or not file.filename:
             flash("Choose an ADIF (.adi) file to upload.", "error")
-            return redirect(url_for("admin_log"))
+            return redirect(url_for("admin_log", section="import"))
         try:
             text = file.read().decode("utf-8", errors="ignore")
         except Exception:
             flash("Couldn't read that file.", "error")
-            return redirect(url_for("admin_log"))
+            return redirect(url_for("admin_log", section="import"))
 
         qsos = parse_adif(text)
         try:
             added, backfilled = photomap_store.import_my_qsos(qsos)
         except S3Error as exc:
             flash(s3_config_hint(exc), "error")
-            return redirect(url_for("admin_log"))
+            return redirect(url_for("admin_log", section="import"))
         message = f"Imported {added} new QSO record(s) ({len(qsos)} found in the file)."
         if backfilled:
             message += f" Filled in missing details on {backfilled} already-imported record(s)."
         flash(message, "success")
-        return redirect(url_for("admin_log"))
+        return redirect(url_for("admin_log", section="import"))
 
-    return _render_log_page()
+    # The retired import URL still lands on the import task.
+    section = "import" if request.path.rstrip("/").endswith("import-adif") else None
+    return _render_log_page(section=section)
+
+
+def _log_section(requested, *, missing_report=None) -> str:
+    if requested in LOG_SECTIONS:
+        return requested
+    if missing_report:
+        return "missing"
+    return "sync"
 
 
 def _render_log_page(**extra):
+    section = extra.pop("section", None) or request.args.get("section")
+    section = _log_section(section, missing_report=extra.get("missing_report"))
     try:
         qso_count = photomap_store.count_my_qsos()
         sync_state = photomap_store.qrz_sync_state()
@@ -1325,6 +1372,7 @@ def _render_log_page(**extra):
         sync_state=sync_state,
         logbook_configured=bool(QRZ_LOGBOOK_API_KEY),
         newest_qso_date=f"{newest[:4]}-{newest[4:6]}-{newest[6:]}" if newest else "",
+        section=section,
         **extra,
     )
 
@@ -1404,7 +1452,7 @@ def admin_log_missing():
     except Exception as exc:
         logger.warning("Missing-QSO check failed: %s", exc)
         report["error"] = f"Couldn't complete the check ({exc.__class__.__name__}). Try again in a moment."
-    return _render_log_page(missing_report=report)
+    return _render_log_page(missing_report=report, section="missing")
 
 
 @app.route("/admin/log/sync", methods=["POST"])
@@ -1677,7 +1725,7 @@ def admin_log_sync():
             parts.append(
                 f"QRZ's STATUS reports {qrz_total} QSOs; this log has {here}"
                 + (f" plus {len(qrz_dupes)} QRZ duplicate ids" if qrz_dupes else "")
-                + ". Use \"Find missing QSOs\" for the exact gap -- that STATUS total "
+                + ". Open Find missing QSOs on the Logbook page for the exact gap -- that STATUS total "
                 "can include entries the id list doesn't return, and this log can "
                 "include ADIF contacts that were never uploaded to QRZ."
             )

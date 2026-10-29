@@ -1,183 +1,234 @@
 {% extends "base.html" %}
-{% block title %}Your Log{% endblock %}
+{% import "macros.html" as ui %}
+{% block title %}Logbook -- QSL Tracker{% endblock %}
 {% block content %}
-  <section class="card">
-    <div class="dashboard-top">
-      <h1>Your log</h1>
-      <form method="post" action="{{ url_for('admin_logout') }}">
-{% include "_csrf.html" %}
-        <button type="submit" class="link-button">Log out (admin)</button>
-      </form>
-    </div>
+  <section class="card" id="log-summary">
+    <h1>Logbook</h1>
     <p class="muted">
-      The copy of your log behind <a href="{{ url_for('admin_qso_label') }}">QSO Labels</a>
-      and the card-upload page's QSO auto-fill.
-      {{ qso_count }} QSO record{{ 's' if qso_count != 1 else '' }} on file right now.
+      The copy of your log behind
+      <a href="{{ url_for('admin_qso_label') }}">QSO Labels</a>
+      and QSL Cards auto-fill.
     </p>
-  </section>
-
-  <section class="card">
-    <h1>Sync from your QRZ Logbook</h1>
-    {% if logbook_configured %}
-      <p class="muted">
-        Pulls your QRZ Logbook in pages of 250. If your log already has QSOs
-        here (say, from an ADIF import), the first sync only asks QRZ for
-        QSOs from your newest one onward{% if newest_qso_date %} ({{ newest_qso_date }}){% endif %};
-        after that, each sync only fetches QSOs added to QRZ since last time.
-        If a sync stops partway to stay under the server's time limit, press
-        Sync again and it carries on where it left off.
-      </p>
-      <p class="muted">
-        {% if sync_state.get('last_sync') %}
-          Last synced {{ sync_state.last_sync | utc_time }}
-          {%- if sync_state.get('caught_up') %} &mdash; up to date at that point{% else %} &mdash; not finished yet, press Sync to continue{% endif %}.
-        {% else %}
-          Never synced yet.
-        {% endif %}
-      </p>
-      {% if sync_state.get('qrz_total') is not none %}
-        {% set dupes = (sync_state.get('qrz_dupe_logids') or []) | length %}
-        {% set missing = sync_state.qrz_total - qso_count - dupes %}
-        <p class="{{ 'flag-missing' if missing > 0 else 'muted' }}">
-          QRZ Logbook: {{ sync_state.qrz_total }} QSOs &middot; this log: {{ qso_count }}
-          {%- if dupes %} &middot; {{ dupes }} QRZ entr{{ 'y is a duplicate' if dupes == 1 else 'ies are duplicates' }}
-            (same station, date, band and mode within 2 minutes of another entry), counted once here{% endif %}
-          {%- if missing > 0 %} &mdash; {{ missing }} not matched by this count.
-            Use "Find missing QSOs" below for the exact list. This STATUS total can
-            disagree with the id list, and this log can include ADIF contacts that
-            were never uploaded to QRZ.
-          {%- elif missing == 0 %} &mdash; everything accounted for.
-          {%- else %} &mdash; this log has QSOs QRZ doesn't (e.g. from an ADIF of contacts never uploaded to QRZ).{% endif %}
+    <dl class="stat-row">
+      <div>
+        <dt>In this log</dt>
+        <dd>{{ qso_count }}</dd>
+      </div>
+      <div>
+        <dt>QRZ Logbook</dt>
+        <dd>
+          {% if sync_state.get('qrz_total') is not none %}
+            {{ sync_state.qrz_total }}
+          {% else %}
+            <span class="muted">&mdash;</span>
+          {% endif %}
+        </dd>
+      </div>
+      <div>
+        <dt>Last sync</dt>
+        <dd>
+          {% if sync_state.get('last_sync') %}
+            {{ sync_state.last_sync | utc_time }}
+            {% if sync_state.get('caught_up') %}
+              <span class="muted stat-note">Up to date then</span>
+            {% else %}
+              <span class="flag-missing stat-note">Not finished &mdash; press Sync</span>
+            {% endif %}
+          {% else %}
+            <span class="muted">Never</span>
+          {% endif %}
+        </dd>
+      </div>
+      <div>
+        <dt>Newest QSO</dt>
+        <dd>{% if newest_qso_date %}{{ newest_qso_date }}{% else %}<span class="muted">&mdash;</span>{% endif %}</dd>
+      </div>
+    </dl>
+    {% if sync_state.get('qrz_total') is not none %}
+      {% set dupes = (sync_state.get('qrz_dupe_logids') or []) | length %}
+      {% set missing = sync_state.qrz_total - qso_count - dupes %}
+      {% if dupes %}
+        <p class="muted">
+          {{ dupes }} QRZ entr{{ 'y is a duplicate' if dupes == 1 else 'ies are duplicates' }}
+          (same station, date, band, and mode within 2 minutes) and counted once here.
         </p>
       {% endif %}
-      <form method="post" action="{{ url_for('admin_log_sync') }}" style="display: inline;">
-{% include "_csrf.html" %}
-        <button type="submit">Sync from QRZ</button>
-      </form>
-      {% if sync_state.get('last_sync') %}
-        <form method="post" action="{{ url_for('admin_log_sync') }}" style="display: inline;"
-              onsubmit="return confirm('Re-read your whole QRZ Logbook from the start? Nothing gets duplicated. A big log takes a few presses: after this one, keep pressing Sync until it says up to date.');">
-{% include "_csrf.html" %}
-          <input type="hidden" name="full" value="1">
-          <button type="submit" class="link-button">Re-sync everything from the start</button>
-        </form>
+      {% if missing > 0 %}
+        <p class="flag-missing" id="log-not-matched">
+          {{ missing }} not matched.
+          <a href="{{ url_for('admin_log', section='missing') }}">Find missing QSOs</a>
+          for the exact list. This STATUS total can disagree with the id list,
+          and this log can include ADIF contacts that were never uploaded to QRZ.
+        </p>
+      {% elif missing == 0 %}
+        <p class="muted">All QRZ QSOs are accounted for.</p>
+      {% else %}
+        <p class="muted">
+          This log has {{ -missing }} QSO{{ 's' if -missing != 1 else '' }}
+          that QRZ does not (for example from an ADIF of contacts never uploaded).
+        </p>
       {% endif %}
-    {% else %}
+    {% elif not logbook_configured %}
       <p class="flag-missing">
-        Not set up yet: add <code>QRZ_LOGBOOK_API_KEY</code> in Render's
-        Environment settings. Get the key from QRZ.com &rarr; Logbook &rarr;
-        Settings &rarr; API.
+        QRZ sync is not set up yet.
+        <a href="{{ url_for('admin_log', section='sync') }}">Sync from QRZ</a>
+        explains the API key.
       </p>
     {% endif %}
+    {{ ui.logbook_tabs(section) }}
   </section>
 
-  {% if logbook_configured %}
-  <section class="card">
-    <h1>Find missing QSOs</h1>
-    <p class="muted">
-      Asks QRZ for the list of every QSO id in your logbook (just the ids,
-      fast), compares it with what's here, and shows exactly which entries
-      aren't accounted for &mdash; and why. Nothing is changed unless you
-      choose to import.
-    </p>
-    <form method="post" action="{{ url_for('admin_log_missing') }}">
-{% include "_csrf.html" %}
-      <button type="submit">Find missing QSOs</button>
-    </form>
-
-    {% if missing_report %}
-      {% set r = missing_report %}
-      {% if r.error %}
-        <p class="flag-missing">{{ r.error }}</p>
-      {% else %}
-        <p>
-          QRZ lists <strong>{{ r.qrz_listed }}</strong> QSO ids;
-          this log accounts for <strong>{{ r.accounted }}</strong>;
-          <strong>{{ r.missing_count }}</strong> not accounted for.
-          {% if sync_state.get('qrz_total') and sync_state.qrz_total != r.qrz_listed %}
-            <br><span class="muted">Note: QRZ's own total says {{ sync_state.qrz_total }}, but its id list
-            has {{ r.qrz_listed }} &mdash; the other {{ sync_state.qrz_total - r.qrz_listed }} aren't
-            fetchable through the API at all.</span>
-          {% endif %}
+  {% if section == 'sync' %}
+    <section class="card" id="log-panel-sync">
+      <h2>Sync from QRZ</h2>
+      {% if logbook_configured %}
+        <p class="muted">
+          Pulls your QRZ Logbook in pages of 250. If your log already has QSOs
+          here (say, from an ADIF import), the first sync only asks QRZ for
+          QSOs from your newest one onward{% if newest_qso_date %} ({{ newest_qso_date }}){% endif %};
+          after that, each sync only fetches QSOs added to QRZ since last time.
+          If a sync stops partway to stay under the server's time limit, press
+          Sync again and it carries on where it left off.
         </p>
-        {% if r.rows %}
-          {% set new_rows = r.rows | selectattr('outcome', 'equalto', 'new') | list %}
-          {% set match_rows = r.rows | selectattr('outcome', 'equalto', 'matches') | list %}
-          <table class="contacts">
-            <thead>
-              <tr><th>QRZ id</th><th>Callsign</th><th>Date</th><th>Time</th><th>Band / Mode</th><th>Freq</th><th>What happens</th></tr>
-            </thead>
-            <tbody>
-              {% for row in r.rows %}
-                <tr>
-                  <td>{{ row.logid or '-' }}</td>
-                  <td>{{ row.callsign or '-' }}</td>
-                  <td>{{ row.qso_date or '-' }}</td>
-                  <td>{{ row.time_on or '-' }}</td>
-                  <td>{{ [row.band, row.mode] | select | join(' / ') or '-' }}</td>
-                  <td>{{ row.freq or '-' }}</td>
-                  <td>
-                    {% if row.outcome == 'new' %}
-                      <strong>Not here &mdash; would be added</strong>
-                    {% elif row.outcome == 'matches' %}
-                      Treated as the same contact as
-                      {{ row.row.callsign }} {{ row.row.qso_date }} {{ row.row.time_on or '(no time)' }}
-                      {{ row.row.freq }}{% if row.row.qrz_logid %} (QRZ id {{ row.row.qrz_logid }}){% endif %}
-                    {% else %}
-                      Skipped: {{ row.outcome }}
-                    {% endif %}
-                  </td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-          {% if new_rows or match_rows %}
-            <form method="post" action="{{ url_for('admin_log_missing') }}" style="margin-top: 1rem;">
+        <div class="button-row">
+          <form method="post" action="{{ url_for('admin_log_sync') }}">
 {% include "_csrf.html" %}
-              <input type="hidden" name="import" value="1">
-              <button type="submit">
-                {%- if new_rows and match_rows -%}
-                  Import {{ new_rows | length }} new and mark {{ match_rows | length }} as QRZ duplicates
-                {%- elif new_rows -%}
-                  Import the {{ new_rows | length }} that aren't here
-                {%- else -%}
-                  Mark {{ match_rows | length }} as QRZ duplicates
-                {%- endif -%}
-              </button>
+            <button type="submit">Sync from QRZ</button>
+          </form>
+          {% if sync_state.get('last_sync') %}
+            <form method="post" action="{{ url_for('admin_log_sync') }}"
+                  onsubmit="return confirm('Re-read your whole QRZ Logbook from the start? Nothing gets duplicated. A big log takes a few presses: after this one, keep pressing Sync until it says up to date.');">
+{% include "_csrf.html" %}
+              <input type="hidden" name="full" value="1">
+              <button type="submit" class="link-button">Re-sync everything from the start</button>
             </form>
           {% endif %}
-        {% endif %}
-        {% if r.truncated %}
-          <p class="muted">Stopped early to stay under the server time limit. Run Find missing again to continue.</p>
-        {% endif %}
-        {% if r.not_returned %}
-          <p class="flag-missing">
-            QRZ listed these ids but returned nothing when asked for them:
-            {{ r.not_returned | join(', ') }}.
-          </p>
-        {% endif %}
-        {% if r.missing_count > r.rows | length + r.not_returned | length %}
-          <p class="muted">Showing the first {{ r.rows | length }}; run it again after importing to see the rest.</p>
-        {% endif %}
+        </div>
+      {% else %}
+        <p class="flag-missing">
+          Not set up yet: add <code>QRZ_LOGBOOK_API_KEY</code> in Render's
+          Environment settings. Get the key from QRZ.com &rarr; Logbook &rarr;
+          Settings &rarr; API.
+        </p>
       {% endif %}
-    {% endif %}
-  </section>
-  {% endif %}
-
-  <section class="card">
-    <h1>Or upload an ADIF file</h1>
-    <p class="muted">
-      An export from your logging software works too, and it's safe to mix
-      with QRZ syncs: duplicates are skipped, and missing details (UTC time,
-      grid square, DXCC entity) get filled in on records already here. If a
-      QSO has no country in the log, its entity is a best-effort guess from
-      the callsign prefix.
-    </p>
-    <form method="post" action="{{ url_for('admin_log') }}" enctype="multipart/form-data">
+    </section>
+  {% elif section == 'missing' %}
+    <section class="card" id="log-panel-missing">
+      <h2>Find missing QSOs</h2>
+      {% if logbook_configured %}
+        <p class="muted">
+          Asks QRZ for the list of every QSO id in your logbook (just the ids,
+          fast), compares it with what's here, and shows exactly which entries
+          aren't accounted for &mdash; and why. Nothing is changed unless you
+          choose to import.
+        </p>
+        <form method="post" action="{{ url_for('admin_log_missing') }}">
 {% include "_csrf.html" %}
-      <label for="adif_file">ADIF log (.adi)</label>
-      <input type="file" id="adif_file" name="adif_file" accept=".adi,.adif" required>
-      <button type="submit">Import</button>
-    </form>
-  </section>
+          <button type="submit">Find missing QSOs</button>
+        </form>
+
+        {% if missing_report %}
+          {% set r = missing_report %}
+          {% if r.error %}
+            <p class="flag-missing">{{ r.error }}</p>
+          {% else %}
+            <p>
+              QRZ lists <strong>{{ r.qrz_listed }}</strong> QSO ids;
+              this log accounts for <strong>{{ r.accounted }}</strong>;
+              <strong>{{ r.missing_count }}</strong> not accounted for.
+              {% if sync_state.get('qrz_total') and sync_state.qrz_total != r.qrz_listed %}
+                <br><span class="muted">Note: QRZ's own total says {{ sync_state.qrz_total }}, but its id list
+                has {{ r.qrz_listed }} &mdash; the other {{ sync_state.qrz_total - r.qrz_listed }} aren't
+                fetchable through the API at all.</span>
+              {% endif %}
+            </p>
+            {% if r.rows %}
+              {% set new_rows = r.rows | selectattr('outcome', 'equalto', 'new') | list %}
+              {% set match_rows = r.rows | selectattr('outcome', 'equalto', 'matches') | list %}
+              <div class="table-scroll">
+                <table class="contacts">
+                  <thead>
+                    <tr><th>QRZ id</th><th>Callsign</th><th>Date</th><th>Time</th><th>Band / Mode</th><th>Freq</th><th>What happens</th></tr>
+                  </thead>
+                  <tbody>
+                    {% for row in r.rows %}
+                      <tr>
+                        <td>{{ row.logid or '-' }}</td>
+                        <td>{{ row.callsign or '-' }}</td>
+                        <td>{{ row.qso_date or '-' }}</td>
+                        <td>{{ row.time_on or '-' }}</td>
+                        <td>{{ [row.band, row.mode] | select | join(' / ') or '-' }}</td>
+                        <td>{{ row.freq or '-' }}</td>
+                        <td>
+                          {% if row.outcome == 'new' %}
+                            <strong>Not here &mdash; would be added</strong>
+                          {% elif row.outcome == 'matches' %}
+                            Treated as the same contact as
+                            {{ row.row.callsign }} {{ row.row.qso_date }} {{ row.row.time_on or '(no time)' }}
+                            {{ row.row.freq }}{% if row.row.qrz_logid %} (QRZ id {{ row.row.qrz_logid }}){% endif %}
+                          {% else %}
+                            Skipped: {{ row.outcome }}
+                          {% endif %}
+                        </td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+              {% if new_rows or match_rows %}
+                <form method="post" action="{{ url_for('admin_log_missing') }}">
+{% include "_csrf.html" %}
+                  <input type="hidden" name="import" value="1">
+                  <button type="submit">
+                    {%- if new_rows and match_rows -%}
+                      Import {{ new_rows | length }} new and mark {{ match_rows | length }} as QRZ duplicates
+                    {%- elif new_rows -%}
+                      Import the {{ new_rows | length }} that aren't here
+                    {%- else -%}
+                      Mark {{ match_rows | length }} as QRZ duplicates
+                    {%- endif -%}
+                  </button>
+                </form>
+              {% endif %}
+            {% endif %}
+            {% if r.truncated %}
+              <p class="muted">Stopped early to stay under the server time limit. Run Find missing again to continue.</p>
+            {% endif %}
+            {% if r.not_returned %}
+              <p class="flag-missing">
+                QRZ listed these ids but returned nothing when asked for them:
+                {{ r.not_returned | join(', ') }}.
+              </p>
+            {% endif %}
+            {% if r.missing_count > r.rows | length + r.not_returned | length %}
+              <p class="muted">Showing the first {{ r.rows | length }}; run it again after importing to see the rest.</p>
+            {% endif %}
+          {% endif %}
+        {% endif %}
+      {% else %}
+        <p class="flag-missing">
+          Find missing QSOs needs <code>QRZ_LOGBOOK_API_KEY</code>.
+          <a href="{{ url_for('admin_log', section='sync') }}">Sync from QRZ</a>
+          has where to set it.
+        </p>
+      {% endif %}
+    </section>
+  {% else %}
+    <section class="card" id="log-panel-import">
+      <h2>Import ADIF</h2>
+      <p class="muted">
+        An export from your logging software works too, and it's safe to mix
+        with QRZ syncs: duplicates are skipped, and missing details (UTC time,
+        grid square, DXCC entity) get filled in on records already here. If a
+        QSO has no country in the log, its entity is a best-effort guess from
+        the callsign prefix.
+      </p>
+      <form method="post" action="{{ url_for('admin_log') }}" enctype="multipart/form-data">
+{% include "_csrf.html" %}
+        <label for="adif_file">ADIF log (.adi)</label>
+        <input type="file" id="adif_file" name="adif_file" accept=".adi,.adif" required>
+        <button type="submit">Import</button>
+      </form>
+    </section>
+  {% endif %}
 {% endblock %}

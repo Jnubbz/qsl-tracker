@@ -1,19 +1,19 @@
 {% extends "base.html" %}
-{% block title %}Upload card -- QSL Photo Map{% endblock %}
+{% import "macros.html" as ui %}
+{% block title %}Upload -- QSL Cards{% endblock %}
+{% block breadcrumbs %}
+  {{ ui.breadcrumbs([
+    ('QSL Cards', url_for('admin_photomap_manage')),
+    ('Upload', none),
+  ]) }}
+{% endblock %}
 {% block content %}
   <section class="card">
-    <div class="dashboard-top">
-      <h1>Upload a QSL card</h1>
-      <form method="post" action="{{ url_for('admin_logout') }}">
-{% include "_csrf.html" %}
-        <button type="submit" class="link-button">Log out (admin)</button>
-      </form>
-    </div>
+    <h1>Upload a card</h1>
+    {{ ui.cards_tabs('upload') }}
     <p class="muted">
-      <a href="{{ url_for('admin_log') }}">Sync or import your log</a>
-      to enable QSO auto-fill below, or
-      <a href="{{ url_for('admin_photomap_manage') }}">manage/edit already-uploaded cards</a>
-      -- add a missing photo, fill in missing QSO info, or fix a mistake.
+      <a href="{{ url_for('admin_log') }}">Open the Logbook</a>
+      to sync or import QSOs so the fields below can auto-fill.
       A callsign's map location comes from QRZ; if it hasn't been looked up
       before and your QRZ session has lapsed, you'll be sent to log in again
       before the save goes through.
@@ -29,39 +29,7 @@
       <label for="images">Card photo(s) -- front only</label>
       <input type="file" id="images" name="images" accept="image/*" multiple required>
 
-      <div class="lookup-forms">
-        <div>
-          <label for="qso_date">QSO date (YYYYMMDD)</label>
-          <input type="text" id="qso_date" name="qso_date" placeholder="20260615">
-        </div>
-        <div>
-          <label for="band">Band</label>
-          <input type="text" id="band" name="band" placeholder="40M">
-        </div>
-      </div>
-      <div class="lookup-forms">
-        <div>
-          <label for="mode">Mode</label>
-          <input type="text" id="mode" name="mode" placeholder="SSB">
-        </div>
-        <div>
-          <label for="freq">Frequency (MHz)</label>
-          <input type="text" id="freq" name="freq" placeholder="7.185">
-        </div>
-      </div>
-      <div class="lookup-forms">
-        <div>
-          <label for="rst_sent">RST sent</label>
-          <input type="text" id="rst_sent" name="rst_sent" placeholder="59">
-        </div>
-        <div>
-          <label for="rst_rcvd">RST received</label>
-          <input type="text" id="rst_rcvd" name="rst_rcvd" placeholder="59">
-        </div>
-      </div>
-
-      <label for="note">Note (optional)</label>
-      <input type="text" id="note" name="note" placeholder="e.g. Field Day 2026">
+      {{ ui.qso_detail_fields() }}
 
       <button type="submit">Save card</button>
     </form>
@@ -69,7 +37,8 @@
 
   {% if recent_cards %}
     <section class="card">
-      <h1>Recently uploaded</h1>
+      <h2>Recently uploaded</h2>
+      <div class="table-scroll">
       <table class="contacts">
         <thead>
           <tr><th>Callsign</th><th>Date</th><th>Band</th><th>Mode</th><th>Note</th><th></th></tr>
@@ -87,6 +56,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     </section>
   {% endif %}
 

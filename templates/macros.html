@@ -1,0 +1,84 @@
+{# Shared bits of page chrome. Tool names here match the nav in base.html. #}
+
+{% macro nav_link(endpoint, label, match=None) -%}
+  {% set names = match if match is not none else [endpoint] %}
+  <a href="{{ url_for(endpoint) }}"{% if request.endpoint in names %} aria-current="page"{% endif %}>{{ label }}</a>
+{%- endmacro %}
+
+{% macro breadcrumbs(items) -%}
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      {% for label, href in items %}
+        <li>
+          {% if href %}
+            <a href="{{ href }}">{{ label }}</a>
+          {% else %}
+            <span aria-current="page">{{ label }}</span>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ol>
+  </nav>
+{%- endmacro %}
+
+{% macro qrz_login_fields(autofocus=false) -%}
+  <label for="qrz_username">QRZ username</label>
+  <input type="text" id="qrz_username" name="qrz_username" autocomplete="username" required{% if autofocus %} autofocus{% endif %}>
+
+  <label for="qrz_password">QRZ password</label>
+  <input type="password" id="qrz_password" name="qrz_password" autocomplete="current-password" required>
+{%- endmacro %}
+
+{# QSO date/band/mode/freq/RST/note. Same field names the upload and edit
+   handlers already read. `card` is a dict-like row, or omitted for a blank form. #}
+{% macro qso_detail_fields(card=None) -%}
+  {% set card = card or {} %}
+  <div class="lookup-forms">
+    <div>
+      <label for="qso_date">QSO date (YYYYMMDD)</label>
+      <input type="text" id="qso_date" name="qso_date" value="{{ card.qso_date or '' }}" placeholder="20260615">
+    </div>
+    <div>
+      <label for="band">Band</label>
+      <input type="text" id="band" name="band" value="{{ card.band or '' }}" placeholder="40M">
+    </div>
+  </div>
+  <div class="lookup-forms">
+    <div>
+      <label for="mode">Mode</label>
+      <input type="text" id="mode" name="mode" value="{{ card.mode or '' }}" placeholder="SSB">
+    </div>
+    <div>
+      <label for="freq">Frequency (MHz)</label>
+      <input type="text" id="freq" name="freq" value="{{ card.freq or '' }}" placeholder="7.185">
+    </div>
+  </div>
+  <div class="lookup-forms">
+    <div>
+      <label for="rst_sent">RST sent</label>
+      <input type="text" id="rst_sent" name="rst_sent" value="{{ card.rst_sent or '' }}" placeholder="59">
+    </div>
+    <div>
+      <label for="rst_rcvd">RST received</label>
+      <input type="text" id="rst_rcvd" name="rst_rcvd" value="{{ card.rst_rcvd or '' }}" placeholder="59">
+    </div>
+  </div>
+
+  <label for="note">Note (optional)</label>
+  <input type="text" id="note" name="note" value="{{ card.note or '' }}" placeholder="e.g. Field Day 2026">
+{%- endmacro %}
+
+{% macro cards_tabs(active) -%}
+  <nav class="section-tabs" aria-label="QSL Cards">
+    <a href="{{ url_for('admin_photomap_manage') }}"{% if active == 'manage' %} class="active" aria-current="page"{% endif %}>All cards</a>
+    <a href="{{ url_for('admin_photomap_upload') }}"{% if active == 'upload' %} class="active" aria-current="page"{% endif %}>Upload</a>
+  </nav>
+{%- endmacro %}
+
+{% macro logbook_tabs(active) -%}
+  <nav class="section-tabs" aria-label="Logbook tasks">
+    <a href="{{ url_for('admin_log', section='sync') }}"{% if active == 'sync' %} class="active" aria-current="page"{% endif %}>Sync from QRZ</a>
+    <a href="{{ url_for('admin_log', section='missing') }}"{% if active == 'missing' %} class="active" aria-current="page"{% endif %}>Find missing QSOs</a>
+    <a href="{{ url_for('admin_log', section='import') }}"{% if active == 'import' %} class="active" aria-current="page"{% endif %}>Import ADIF</a>
+  </nav>
+{%- endmacro %}

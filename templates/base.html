@@ -1,3 +1,4 @@
+{% import "macros.html" as ui %}
 <!doctype html>
 <html lang="en">
 <head>
@@ -10,14 +11,45 @@
 <body>
   <header class="site-header">
     <a class="brand" href="{{ url_for('index') }}">QSL Tracker</a>
-    <p class="tagline">Mailing labels, QSO labels, and the QSL photo map.</p>
-    <nav class="site-nav">
-      <a href="{{ url_for('raw_address') }}">Raw Address Ripper</a>
-      <a href="{{ url_for('photomap') }}">QSL Photo Map</a>
-      {% if session.get('is_admin') %}
-        <a href="{{ url_for('admin_qso_label') }}">QSO Labels</a>
-        <a href="{{ url_for('admin_qso_map') }}">QSO Map</a>
-        <a href="{{ url_for('admin_photomap_manage') }}">QSL Cards</a>
+    <p class="tagline">ADIF Address Extractor, QSO Labels, and the QSL Photo Map.</p>
+    {% if nav_qrz_username or nav_is_admin %}
+      <div class="header-session">
+        {% if nav_qrz_username %}
+          <span>QRZ: <strong>{{ nav_qrz_username }}</strong></span>
+          <form method="post" action="{{ url_for('logout') }}" class="inline-form">
+{% include "_csrf.html" %}
+            <button type="submit" class="link-button">Log out of QRZ</button>
+          </form>
+        {% endif %}
+        {% if nav_is_admin %}
+          <form method="post" action="{{ url_for('admin_logout') }}" class="inline-form">
+{% include "_csrf.html" %}
+            <button type="submit" class="link-button">Log out of admin</button>
+          </form>
+        {% endif %}
+      </div>
+    {% endif %}
+    <nav class="site-nav" aria-label="Main">
+      {% if nav_is_admin %}
+        <div class="nav-group">
+          {{ ui.nav_link('admin_log', 'Logbook') }}
+          {{ ui.nav_link('admin_qso_label', 'QSO Labels') }}
+          {{ ui.nav_link('admin_qso_map', 'QSO Map') }}
+          {{ ui.nav_link('raw_address', 'ADIF Address Extractor', ['raw_address', 'index']) }}
+          {{ ui.nav_link('admin_photomap_manage', 'QSL Cards', ['admin_photomap_manage', 'admin_photomap_upload', 'admin_photomap_edit']) }}
+          {{ ui.nav_link('admin_requests', 'Card requests') }}
+        </div>
+        <div class="nav-group">
+          {{ ui.nav_link('photomap', 'QSL Photo Map') }}
+          {{ ui.nav_link('request_qsl', 'Request a Card', ['request_qsl', 'request_qsl_thanks']) }}
+        </div>
+      {% else %}
+        <div class="nav-group">
+          {{ ui.nav_link('raw_address', 'ADIF Address Extractor', ['raw_address', 'index']) }}
+          {{ ui.nav_link('photomap', 'QSL Photo Map') }}
+          {{ ui.nav_link('request_qsl', 'Request a Card', ['request_qsl', 'request_qsl_thanks']) }}
+          {{ ui.nav_link('admin_login', 'Admin') }}
+        </div>
       {% endif %}
     </nav>
   </header>
@@ -33,6 +65,7 @@
       {% endif %}
     {% endwith %}
 
+    {% block breadcrumbs %}{% endblock %}
     {% block content %}{% endblock %}
   </main>
 

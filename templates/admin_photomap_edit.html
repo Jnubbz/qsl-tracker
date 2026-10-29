@@ -1,11 +1,16 @@
 {% extends "base.html" %}
-{% block title %}Edit {{ card['callsign'] }} -- QSL Photo Map{% endblock %}
+{% import "macros.html" as ui %}
+{% block title %}Edit {{ card['callsign'] }} -- QSL Cards{% endblock %}
+{% block breadcrumbs %}
+  {{ ui.breadcrumbs([
+    ('QSL Cards', url_for('admin_photomap_manage')),
+    ('Edit ' ~ card['callsign'], none),
+  ]) }}
+{% endblock %}
 {% block content %}
   <section class="card">
-    <div class="dashboard-top">
-      <h1>Edit {{ card['callsign'] }}</h1>
-      <a href="{{ url_for('admin_photomap_manage') }}">Back to QSL cards</a>
-    </div>
+    <h1>Edit {{ card['callsign'] }}</h1>
+    {{ ui.cards_tabs('edit') }}
 
     {% if images %}
       <label>Current photo(s)</label>
@@ -27,39 +32,7 @@
       <label for="images">Add photo(s)</label>
       <input type="file" id="images" name="images" accept="image/*" multiple>
 
-      <div class="lookup-forms">
-        <div>
-          <label for="qso_date">QSO date (YYYYMMDD)</label>
-          <input type="text" id="qso_date" name="qso_date" value="{{ card['qso_date'] or '' }}" placeholder="20260615">
-        </div>
-        <div>
-          <label for="band">Band</label>
-          <input type="text" id="band" name="band" value="{{ card['band'] or '' }}" placeholder="40M">
-        </div>
-      </div>
-      <div class="lookup-forms">
-        <div>
-          <label for="mode">Mode</label>
-          <input type="text" id="mode" name="mode" value="{{ card['mode'] or '' }}" placeholder="SSB">
-        </div>
-        <div>
-          <label for="freq">Frequency (MHz)</label>
-          <input type="text" id="freq" name="freq" value="{{ card['freq'] or '' }}" placeholder="7.185">
-        </div>
-      </div>
-      <div class="lookup-forms">
-        <div>
-          <label for="rst_sent">RST sent</label>
-          <input type="text" id="rst_sent" name="rst_sent" value="{{ card['rst_sent'] or '' }}" placeholder="59">
-        </div>
-        <div>
-          <label for="rst_rcvd">RST received</label>
-          <input type="text" id="rst_rcvd" name="rst_rcvd" value="{{ card['rst_rcvd'] or '' }}" placeholder="59">
-        </div>
-      </div>
-
-      <label for="note">Note (optional)</label>
-      <input type="text" id="note" name="note" value="{{ card['note'] or '' }}" placeholder="e.g. Field Day 2026">
+      {{ ui.qso_detail_fields(card) }}
 
       <button type="submit">Save changes</button>
     </form>
