@@ -1,0 +1,44 @@
+# Builds the container and publishes it to GHCR. Does not run the test
+# suite and does not contact QRZ, S3, or Resend.
+name: Publish container image
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-image-main
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Push to main, or a manual run from main. A dispatch from another
+    # branch must not move the :latest tag Unraid pulls.
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and push
+        run: |
+          image=ghcr.io/jnubbz/qsl-tracker
+          sha="${GITHUB_SHA::7}"
+          docker build \
+            --platform linux/amd64 \
+            --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --tag "${image}:latest" \
+            --tag "${image}:${sha}" \
+            .
+          docker push "${image}:latest"
+          docker push "${image}:${sha}"

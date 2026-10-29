@@ -187,27 +187,94 @@ see "QSL Photo Map" below for why (it's stored in S3 as JSON instead),
 so cards uploaded through `/admin/photomap/upload` survive Render
 redeploys/spin-downs on the free plan just fine, no disk upgrade needed.
 
-**Self-hosting on Unraid was considered and built out** (see the git
-history around 2026-08-21 -- `Dockerfile`, `docker-compose.yml`,
-`.env.example`, an nginx config example) as a way to get a real
-persistent disk instead of working around Render's ephemeral one. That
-plan is currently on hold: Josh's Starlink failover doesn't play nicely
-with the reverse-proxy setup that'd be needed to expose a self-hosted
-container reliably. Render stays the deployment target for now. The
-Docker files are left in the repo in case that changes -- they're inert
-otherwise (nothing about the Render deployment depends on them).
+## Running on Unraid
 
-If this comes back up later, the previously-written steps (get the repo
-onto the box, copy `.env.example` to `.env`, check the volume path in
-`docker-compose.yml`, `docker compose up -d --build`, reverse proxy
-`qsl.kn0ble.com` to the published port using
-`nginx-qsl.kn0ble.com.conf.example` as a starting point, then repoint
-DNS) are all still valid -- nothing about them changed, they're just
-not the active plan right now. One thing that *did* change since they
-were written: there's no need to migrate any QSL Photo Map data off of
-Render before a future cutover -- it already lives in S3 (see below),
-not in Render's SQLite disk, so it'd already be there regardless of
-where the app itself runs.
+Run the app on the Unraid box as a container. `render.yaml` is
+unchanged and still describes the Render service. A push to `main`
+(or a manual run of the "Publish container image" workflow from
+`main`) builds `ghcr.io/jnubbz/qsl-tracker` for amd64 and tags it
+`latest` plus the short git sha. The image runs gunicorn with one
+worker and a 120 second timeout, listens on port 8000, and keeps
+SQLite at `/data/qsl_tracker.db`. Cards and the QSO log stay in S3,
+so they do not move with the container.
+
+Cloudflare Tunnel is the public entry. `cloudflared` only connects
+outbound, and the compose file publishes no host ports. That needs
+no router port forward. kn0ble.com's DNS zone has to be hosted on
+Cloudflare for the tunnel hostname to exist. The free plan is enough;
+a paid Zero Trust plan is not required. If the zone is still on
+another DNS host, move the nameservers to Cloudflare first.
+
+The photo map and the log already live in S3, not on Render's disk.
+Turning Render off does not delete them. Do that once
+`https://qsl.kn0ble.com` is serving from Unraid, so two copies are
+not syncing the log at the same time.
+
+1. Create the appdata folders before the first `docker compose up`.
+   The process is uid 99, gid 100 (Unraid's `nobody:users`). If the
+   data folder is missing, Compose creates it as root and the app
+   cannot write its database:
+
+   ```bash
+   mkdir -p /mnt/cache/appdata/qsl-tracker/data
+   chown nobody:users /mnt/cache/appdata/qsl-tracker/data
+   ```
+
+2. Copy `docker-compose.yml` and `.env.example` into
+   `/mnt/cache/appdata/qsl-tracker/`. Copy the example to `.env` and
+   replace every placeholder. Nothing in `.env.example` is a real
+   credential. Leave `QSL_DB_PATH=/data/qsl_tracker.db`. Generate
+   `SECRET_KEY` with
+   `python3 -c 'import secrets; print(secrets.token_hex(32))'`.
+   Leave `SESSION_COOKIE_SECURE` at `1` (or delete the line) once
+   visitors use HTTPS. The home test below is the one time it is `0`.
+
+3. In the Cloudflare dashboard: Zero Trust, Networks, Tunnels, create
+   a tunnel, choose Docker, and put the token in `.env` as
+   `TUNNEL_TOKEN`. Add a public hostname `qsl.kn0ble.com` whose
+   service is `http://qsl-tracker:8000`. That name is the app
+   container on the compose network, not an address on the Unraid host.
+
+4. After the first green run on `main`, the image is at
+   `ghcr.io/jnubbz/qsl-tracker`. If a pull on Unraid is denied, the
+   package is still private: either make it public (GitHub, Packages,
+   package settings, change visibility) or run `docker login ghcr.io`
+   on Unraid with a token that can read packages.
+
+5. Start it from the appdata directory:
+
+   ```bash
+   cd /mnt/cache/appdata/qsl-tracker
+   docker compose up -d
+   ```
+
+   To pick up a new `latest`, schedule the same two commands. The
+   User Scripts plugin can run them daily. The app service sets
+   `pull_policy: always`, so `up -d` recreates the container when
+   the image changed:
+
+   ```bash
+   cd /mnt/cache/appdata/qsl-tracker
+   docker compose pull
+   docker compose up -d
+   ```
+
+6. Backups. Point the Appdata Backup plugin at
+   `/mnt/cache/appdata/qsl-tracker` so the SQLite file and `.env`
+   are copied. `.env` has secrets, so keep that backup private.
+   In the AWS console, turn on versioning for the photo-map bucket.
+   Versioning is what lets you restore the log and the card index
+   after a bad write. The appdata copy does not back up S3.
+
+7. A browser on the LAN, over plain HTTP, drops the session cookie
+   while it is marked Secure. To click through before the hostname
+   works, set `SESSION_COOKIE_SECURE=0` in `.env`, temporarily add
+   `ports: ["8000:8000"]` under the `qsl-tracker` service, and run
+   `docker compose up -d`. Open `http://<unraid-ip>:8000`. When
+   `https://qsl.kn0ble.com` loads, remove that `ports` entry, set
+   `SESSION_COOKIE_SECURE` back to `1` (or delete the line), and run
+   `docker compose up -d` again. Normal operation publishes no ports.
+
 
 ## Email notifications for QSL card requests
 

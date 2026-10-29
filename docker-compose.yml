@@ -1,0 +1,35 @@
+# Unraid stack. Copy this file and .env.example to
+# /mnt/cache/appdata/qsl-tracker/, fill in .env, then:
+#   docker compose up -d
+#
+# No host ports. cloudflared dials out to Cloudflare, and the tunnel's
+# public hostname qsl.kn0ble.com points at http://qsl-tracker:8000
+# on this network. Set that hostname in the Cloudflare dashboard.
+
+services:
+  qsl-tracker:
+    image: ghcr.io/jnubbz/qsl-tracker:latest
+    container_name: qsl-tracker
+    restart: unless-stopped
+    pull_policy: always
+    env_file: .env
+    volumes:
+      - /mnt/cache/appdata/qsl-tracker/data:/data
+    networks:
+      - qsl
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: qsl-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN}
+    depends_on:
+      qsl-tracker:
+        condition: service_healthy
+    networks:
+      - qsl
+
+networks:
+  qsl:
