@@ -190,15 +190,21 @@ def utc_time(ts) -> str:
 
 @app.before_request
 def ensure_session():
+    # /healthz is the container probe. Skip the session cookie and the
+    # SQLite purge so a liveness check does not write anything. The
+    # route itself never calls S3 or QRZ.
+    if request.endpoint == "healthz":
+        return None
     if "session_id" not in session:
         session["session_id"] = secrets.token_urlsafe(24)
     db.purge_expired()
 
 
 # /request-qsl is posted from plain HTML on kn0ble.com, which cannot
-# carry a token minted here. Every other POST must present the token
-# stored in the session (hidden form field or X-CSRF-Token).
-CSRF_EXEMPT_ENDPOINTS = frozenset({"request_qsl"})
+# carry a token minted here. /healthz is the unauthenticated probe.
+# Every other POST must present the token stored in the session
+# (hidden form field or X-CSRF-Token).
+CSRF_EXEMPT_ENDPOINTS = frozenset({"request_qsl", "healthz"})
 
 
 def _csrf_token() -> str:
@@ -304,6 +310,12 @@ def s3_config_hint(exc: S3Error) -> str:
         "AWS_SECRET_ACCESS_KEY are all set correctly in Render's "
         "Environment settings."
     )
+
+
+@app.route("/healthz")
+def healthz():
+    """Liveness probe. Plain 200, no session, no S3, no QRZ."""
+    return Response("ok", status=200, mimetype="text/plain")
 
 
 @app.route("/")
