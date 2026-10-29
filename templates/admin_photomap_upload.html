@@ -5,6 +5,7 @@
     <div class="dashboard-top">
       <h1>Upload a QSL card</h1>
       <form method="post" action="{{ url_for('admin_logout') }}">
+{% include "_csrf.html" %}
         <button type="submit" class="link-button">Log out (admin)</button>
       </form>
     </div>
@@ -19,6 +20,7 @@
     </p>
 
     <form method="post" action="{{ url_for('admin_photomap_upload') }}" enctype="multipart/form-data" id="upload-form">
+{% include "_csrf.html" %}
       <label for="callsign">Callsign</label>
       <input type="text" id="callsign" name="callsign" value="{{ callsign_prefill }}" placeholder="e.g. W1AW" required autofocus>
 

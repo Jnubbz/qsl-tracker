@@ -5,6 +5,7 @@
     <div class="dashboard-top">
       <h1>QSL cards</h1>
       <form method="post" action="{{ url_for('admin_logout') }}">
+{% include "_csrf.html" %}
         <button type="submit" class="link-button">Log out (admin)</button>
       </form>
     </div>
@@ -50,6 +51,7 @@
                 <form method="post" action="{{ url_for('admin_photomap_delete', card_id=c['id']) }}"
                       style="display:inline"
                       onsubmit="return confirm('Delete this {{ c['callsign'] }} card and its photo(s)? This can\'t be undone.');">
+{% include "_csrf.html" %}
                   <button type="submit" class="link-button danger">Delete</button>
                 </form>
               </td>

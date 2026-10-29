@@ -20,12 +20,29 @@ to set (see render.yaml / README).
 from __future__ import annotations
 
 import json
-import mimetypes
 import os
+import re
 import uuid
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
+
+# Card photos are the only objects the public image route will stream,
+# and the only objects delete_object() will remove. The log itself is
+# photocards/_index.json -- same prefix, but not a photo, and it must
+# never be downloadable or deletable through those paths.
+CARD_IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "webp", "gif"}
+CARD_IMAGE_TYPES = {
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+    "webp": "image/webp",
+    "gif": "image/gif",
+}
+_CARD_IMAGE_RE = re.compile(
+    r"^photocards/(?P<callsign>.+)/([0-9a-f]{32})\.(jpg|jpeg|png|webp|gif)$",
+    re.IGNORECASE,
+)
 
 # ClientError covers AWS *rejecting* a request (bad bucket, permission
 # denied, etc). BotoCoreError is the broader base class that also
@@ -46,6 +63,34 @@ class S3Error(Exception):
     """Raised when an upload or presign call to S3 fails."""
 
 
+def is_card_image_key(key: str) -> bool:
+    """True only for photocards/<callsign>/<32 hex>.<image ext>.
+
+    The callsign may contain slashes (FP/KJ1V). Anything else under the
+    prefix, including photocards/_index.json, is rejected. `..` path
+    segments are rejected too."""
+    if not isinstance(key, str) or not key or "\\" in key or "\x00" in key:
+        return False
+    parts = key.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        return False
+    if any(part.lower() == "_index.json" for part in parts):
+        return False
+    match = _CARD_IMAGE_RE.match(key)
+    if not match:
+        return False
+    callsign = match.group("callsign")
+    if not callsign or callsign.startswith("/"):
+        return False
+    return True
+
+
+def image_type_for_key(key: str) -> str:
+    """Content type from the key's extension, ignoring whatever S3 stored."""
+    ext = key.rsplit(".", 1)[-1].lower()
+    return CARD_IMAGE_TYPES.get(ext, "application/octet-stream")
+
+
 def _get_client():
     global _client
     if _client is None:
@@ -64,13 +109,14 @@ def upload_card_image(file_storage, callsign: str) -> str:
     if not BUCKET:
         raise S3Error("S3_BUCKET isn't configured.")
 
-    ext = os.path.splitext(file_storage.filename or "")[1].lower() or ".jpg"
-    key = f"photocards/{callsign.upper()}/{uuid.uuid4().hex}{ext}"
-    content_type = (
-        file_storage.content_type
-        or mimetypes.guess_type(file_storage.filename or "")[0]
-        or "application/octet-stream"
-    )
+    ext = os.path.splitext(file_storage.filename or "")[1].lower().lstrip(".")
+    if ext not in CARD_IMAGE_EXTENSIONS:
+        raise S3Error("Card photos must be JPEG, PNG, WEBP, or GIF.")
+    # The extension and content type come from the allowlist, not from
+    # the browser's Content-Type, so an .html upload can't be stored
+    # and later served from this site.
+    key = f"photocards/{callsign.upper()}/{uuid.uuid4().hex}.{ext}"
+    content_type = CARD_IMAGE_TYPES[ext]
     try:
         _get_client().upload_fileobj(
             file_storage,
@@ -104,9 +150,10 @@ def presigned_url(key: str, expires_in: int = 3600) -> str:
 
 
 def delete_object(key: str) -> None:
-    """Delete a single object -- used when the admin edit page removes
-    a photo from a card, or deletes a card outright, so the underlying
-    S3 file doesn't just sit there orphaned."""
+    """Delete a single card photo. Refuses any other key, including the
+    JSON index, so a form field can't be pointed at the log."""
+    if not is_card_image_key(key):
+        raise S3Error("Refusing to delete an object that isn't a card photo.")
     if not BUCKET:
         raise S3Error("S3_BUCKET isn't configured.")
     try:

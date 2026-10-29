@@ -17,6 +17,7 @@ import secrets
 import time
 from datetime import date, datetime, timedelta
 from functools import wraps
+from urllib.parse import urlparse
 
 from flask import Flask, Response, abort, flash, redirect, render_template, request, session, url_for
 
@@ -38,7 +39,14 @@ from qrz import (
     lookup_location,
     status_total_qsos,
 )
-from s3 import S3Error, delete_object, get_object_bytes, upload_card_image
+from s3 import (
+    S3Error,
+    delete_object,
+    get_object_bytes,
+    image_type_for_key,
+    is_card_image_key,
+    upload_card_image,
+)
 
 # Without this, mailer.py's logger.warning()/logger.exception() calls for
 # the QSL request email (see /request-qsl below) wouldn't reliably show
@@ -51,6 +59,33 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    """True/false from an env var. Unset or blank keeps `default`."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+# 8 MB covers an ADIF log and a few card scans. Leave this unset and a
+# visitor can post a body large enough to fill the worker's memory.
+MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+
+app.config.update(
+    MAX_CONTENT_LENGTH=MAX_UPLOAD_BYTES,
+    SESSION_COOKIE_HTTPONLY=True,
+    # Lax: the cookie is sent on ordinary navigations to this site, and
+    # not on a cross-site POST. /request-qsl is the one form posted from
+    # kn0ble.com; it is exempt from CSRF below and does not receive this
+    # cookie on that cross-site submit.
+    SESSION_COOKIE_SAMESITE="Lax",
+    # Secure by default so a production cookie is HTTPS-only. Local
+    # http://127.0.0.1 needs SESSION_COOKIE_SECURE=0 or the browser
+    # drops the cookie. Render is HTTPS, so leave the var unset there.
+    SESSION_COOKIE_SECURE=_env_flag("SESSION_COOKIE_SECURE", True),
+)
 db.init_db()
 
 # Cap how many callsigns the Raw Address Ripper's ADIF bulk-add will
@@ -132,6 +167,61 @@ def ensure_session():
     if "session_id" not in session:
         session["session_id"] = secrets.token_urlsafe(24)
     db.purge_expired()
+
+
+# /request-qsl is posted from plain HTML on kn0ble.com, which cannot
+# carry a token minted here. Every other POST must present the token
+# stored in the session (hidden form field or X-CSRF-Token).
+CSRF_EXEMPT_ENDPOINTS = frozenset({"request_qsl"})
+
+
+def _csrf_token() -> str:
+    token = session.get("_csrf_token")
+    if not isinstance(token, str) or not token:
+        token = secrets.token_urlsafe(32)
+        session["_csrf_token"] = token
+    return token
+
+
+def _csrf_ok() -> bool:
+    expected = session.get("_csrf_token")
+    sent = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token") or ""
+    if not isinstance(expected, str) or not expected or not isinstance(sent, str) or not sent:
+        return False
+    try:
+        return secrets.compare_digest(expected.encode("utf-8"), sent.encode("utf-8"))
+    except Exception:
+        return False
+
+
+@app.before_request
+def csrf_protect():
+    if request.method in ("GET", "HEAD", "OPTIONS", "TRACE"):
+        return None
+    if request.endpoint in CSRF_EXEMPT_ENDPOINTS:
+        return None
+    if _csrf_ok():
+        return None
+    abort(400, description="Missing or invalid CSRF token. Reload the page and try again.")
+
+
+@app.context_processor
+def inject_csrf():
+    return {"csrf_token": _csrf_token}
+
+
+@app.errorhandler(413)
+def request_too_large(_exc):
+    flash(f"That upload is too large. The limit is {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.", "error")
+    targets = {
+        "admin_log": "admin_log",
+        "admin_log_sync": "admin_log",
+        "admin_photomap_upload": "admin_photomap_upload",
+        "admin_photomap_edit": "admin_photomap_manage",
+        "raw_address_adif_batch": "raw_address",
+        "request_qsl": "request_qsl",
+    }
+    return redirect(url_for(targets.get(request.endpoint, "index")))
 
 
 def current_auth():
@@ -600,7 +690,7 @@ def admin_login():
     earlier /login) does the password step show. Both steps land back
     on `next` when done, and a QRZ session already established via the
     main site's /login skips the QRZ step here entirely."""
-    next_url = request.values.get("next") or url_for("admin_qso_label")
+    next_url = _safe_redirect(request.values.get("next"), url_for("admin_qso_label"))
 
     if request.method == "POST" and "qrz_username" in request.form:
         key = qrz_login_attempt(
@@ -617,7 +707,7 @@ def admin_login():
         if not ADMIN_PASSWORD:
             flash("Admin login isn't configured yet (ADMIN_PASSWORD isn't set on the server).", "error")
             return render_template("admin_login.html", next=next_url, stage="password")
-        if not secrets.compare_digest(password, ADMIN_PASSWORD):
+        if not _password_matches(password, ADMIN_PASSWORD):
             flash("Wrong password.", "error")
             return render_template("admin_login.html", next=next_url, stage="password")
         session["is_admin"] = True
@@ -663,21 +753,49 @@ def _next_free_position(used: set, count: int) -> int | None:
     return None
 
 
+def _is_local_path(target: object) -> bool:
+    """True for a same-origin path. Rejects absolute URLs, protocol-
+    relative URLs (`//host`), and backslash forms (`/\\host`) that
+    browsers treat the same way. Also rejects control characters, which
+    would be a response-splitting trick in a Location header."""
+    if not isinstance(target, str) or not target:
+        return False
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in target):
+        return False
+    if "\\" in target:
+        return False
+    if not target.startswith("/") or target.startswith("//"):
+        return False
+    parsed = urlparse(target)
+    return not parsed.scheme and not parsed.netloc
+
+
+def _safe_redirect(target: object, fallback: str) -> str:
+    if isinstance(target, str) and _is_local_path(target):
+        return target
+    return fallback
+
+
 def _safe_next(fallback: str) -> str:
     """Where a batch add/remove/clear form should redirect back to.
     Every such form's default target is its own page (`fallback`,
     already a same-app url_for(...) result) -- but the browse-by-DXCC
-    page (admin_qsos()) also points these same forms at itself via a
-    hidden `next` field, so adding/removing from there doesn't bounce
-    Josh away to the single-lookup page. Only ever trusts a `next` that
-    is a path on this app (starts with exactly one leading "/", never
-    "//" which browsers treat as protocol-relative -- i.e. off-site);
-    anything else is quietly ignored in favor of the normal fallback,
-    same as if `next` had never been sent."""
-    target = request.form.get("next", "")
-    if target.startswith("/") and not target.startswith("//"):
-        return target
-    return fallback
+    page also points these same forms at itself via a hidden `next`
+    field, so adding/removing from there doesn't bounce Josh away.
+    Only a same-app path is trusted; see _is_local_path()."""
+    return _safe_redirect(request.form.get("next", ""), fallback)
+
+
+def _password_matches(provided: str, expected: str) -> bool:
+    """Constant-time compare that accepts non-ASCII passwords.
+
+    secrets.compare_digest rejects non-ASCII *str* with TypeError (and
+    that 500'd admin login). Comparing the UTF-8 bytes keeps the
+    constant-time check and treats any encoding failure as a mismatch."""
+    try:
+        return secrets.compare_digest(provided.encode("utf-8"), expected.encode("utf-8"))
+    except Exception:
+        return False
 
 
 @app.route("/admin/qso-label")
@@ -1620,14 +1738,18 @@ def admin_photomap_edit(card_id):
         removed = 0
         for s3_key in request.form.getlist("remove_image"):
             try:
-                photomap_store.remove_photo_card_image(card_id, s3_key)
+                # Only delete the object after the key was actually
+                # attached to this card. A posted key that isn't on the
+                # card (including the JSON index) is ignored.
+                if not photomap_store.remove_photo_card_image(card_id, s3_key):
+                    continue
                 delete_object(s3_key)
                 removed += 1
             except S3Error:
                 # The card's metadata is already updated even if the S3
                 # delete itself fails -- a leftover orphaned object in
                 # the bucket isn't worth blocking the save over.
-                pass
+                logger.warning("Couldn't delete card photo %s", s3_key)
 
         added, failed = 0, 0
         for f in request.files.getlist("images"):
@@ -1678,7 +1800,7 @@ def admin_photomap_delete(card_id):
         try:
             delete_object(s3_key)
         except S3Error:
-            pass  # metadata's already gone; a leftover S3 object isn't worth blocking on
+            logger.warning("Couldn't delete card photo %s", s3_key)
 
     flash(f"Deleted {removed['callsign']}'s card.", "success")
     return redirect(url_for("admin_photomap_manage"))
@@ -1693,20 +1815,25 @@ def photomap():
 def photomap_image(key):
     """Serves a QSL card photo's bytes straight from S3 through Flask,
     instead of redirecting the browser to a presigned S3 URL -- see
-    get_object_bytes() in s3.py for why. Restricted to the photocards/
-    prefix: this route takes a raw S3 key from the URL path, so it's
-    deliberately not a general "fetch any object" proxy."""
-    if not key.startswith("photocards/"):
+    get_object_bytes() in s3.py for why.
+
+    The key comes from the URL, so this is not a general "fetch any
+    object" proxy. Only a card image key is served. photocards/_index.json
+    lives under the same prefix and holds the whole log; it must 404."""
+    if not is_card_image_key(key):
         abort(404)
     try:
-        body, content_type = get_object_bytes(key)
+        body, _stored_type = get_object_bytes(key)
     except S3Error as exc:
         logger.warning("QSL Photo Map S3 error: %s", exc)
         abort(404)
     return Response(
         body,
-        mimetype=content_type,
-        headers={"Cache-Control": "public, max-age=86400"},
+        mimetype=image_type_for_key(key),
+        headers={
+            "Cache-Control": "public, max-age=86400",
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 

@@ -12,12 +12,15 @@ cookie only ever holds the anonymous `session_id` used to look it up.
 """
 from __future__ import annotations
 
+import os
 import sqlite3
 import time
 from contextlib import contextmanager
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent / "instance" / "qsl_tracker.db"
+# QSL_DB_PATH lets tests point at a throwaway file. Unset in production,
+# so the app keeps using instance/qsl_tracker.db.
+DB_PATH = Path(os.environ.get("QSL_DB_PATH") or (Path(__file__).parent / "instance" / "qsl_tracker.db"))
 SESSION_TTL_HOURS = 24
 
 SCHEMA = """

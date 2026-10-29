@@ -24,8 +24,10 @@ services:
       # they're set directly here. AWS credentials and the admin
       # password are secrets -- sync: false prompts for them in the
       # Render dashboard instead of storing them in the repo. The IAM
-      # user behind those keys only needs s3:PutObject and s3:GetObject
-      # scoped to this bucket's photocards/* prefix -- see README.
+      # user behind those keys needs s3:PutObject, s3:GetObject, and
+      # s3:DeleteObject scoped to this bucket's photocards/* prefix,
+      # plus s3:ListBucket -- see README. DeleteObject is what removes
+      # a photo when a card is edited or deleted.
       - key: S3_BUCKET
         value: kn0ble-qsl-381999184691-us-east-2-an
       - key: AWS_REGION

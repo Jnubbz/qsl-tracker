@@ -8,6 +8,7 @@
       I'll look you up and get one in the mail.
     </p>
     <form method="post" action="{{ url_for('request_qsl') }}">
+{% include "_csrf.html" %}
       <label for="callsign">Your callsign</label>
       <input type="text" id="callsign" name="callsign" maxlength="20" required autocomplete="off">
 

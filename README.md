@@ -38,7 +38,11 @@ A small Flask app for hams, part of [KN0BLE.com](https://kn0ble.com):
   keyed by the anonymous session id.
 - Ripper ADIF uploads are capped at 200 distinct callsigns, paced
   between QRZ requests, and stop early (with a clear message) on a long
-  request or repeated QRZ failures.
+  request or repeated QRZ failures. Any upload (ADIF or card photo) is
+  also capped at 8 MB.
+- Session cookies are `HttpOnly`, `SameSite=Lax`, and `Secure` (HTTPS
+  only, unless `SESSION_COOKIE_SECURE=0`). Every form that posts to this
+  app includes a per-session CSRF token, except `/request-qsl`.
 - **QRZ Logbook sync** pages through the whole logbook with
   `OPTION=MAX:250,AFTERLOGID:n` (QRZ's documented pagination), saving
   the cursor after every page, so the first sync walks everything and
@@ -50,11 +54,16 @@ A small Flask app for hams, part of [KN0BLE.com](https://kn0ble.com):
   card mailed back to *them*. It's embedded directly on kn0ble.com
   (index and awards pages) via a plain HTML `<form>` posting here, and
   also reachable directly. On submit it's saved to a `qsl_requests`
-  table and, if Gmail is configured (see below), emailed straight to
+  table and, if Resend is configured (see below), emailed straight to
   Josh with the callsign, optional note, and optional contact email so
   he can look the callsign up here the normal way and mail a card. A
   hidden honeypot field and a light per-session rate limit (3 requests /
-  10 minutes) guard against bots and spam.
+  10 minutes) guard against bots and spam. This form is the one POST
+  exempt from the CSRF token, because the copy embedded on kn0ble.com
+  is plain HTML and cannot carry a token minted here. The session
+  cookie is `SameSite=Lax`, so that cross-site POST does not include
+  the cookie: the honeypot still runs, but the rate limit only sees
+  requests made on this site itself.
 
 ## Setup
 
@@ -69,10 +78,19 @@ pip install -r requirements.txt
 # optional: pin a stable Flask session signing key across restarts
 export SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
 
+# Session cookies are Secure (HTTPS-only). For local http://127.0.0.1
+# the browser would drop them, so turn that off here. Leave this unset
+# on Render.
+export SESSION_COOKIE_SECURE=0
+
 python3 app.py
 ```
 
 Then open http://127.0.0.1:5000 and log in with your QRZ credentials.
+
+Admin login (`/admin/login`) checks `ADMIN_PASSWORD`. The compare is
+constant-time and accepts a non-ASCII password. Pick something you
+don't use anywhere else.
 
 ## Deploying to Render
 
@@ -214,6 +232,13 @@ and dropped after it ran into a persistent, never-fully-explained
 `SignatureDoesNotMatch` in production -- see `qsl-tracker-status.md` in
 the project for the full debugging trail if this ever needs revisiting.
 
+`/photomap/image/<key>` only serves a card photo:
+`photocards/<callsign>/<32-hex>.jpg|jpeg|png|webp|gif` (the callsign may
+contain a slash, as in `FP/KJ1V`). It responds with the type for that
+extension and `X-Content-Type-Options: nosniff`. It will not serve
+`photocards/_index.json` or any other object. Uploads are limited to
+those same image types; the browser's content type is not trusted.
+
 **All of this data lives in S3, not in Render's SQLite disk** --
 `photomap_store.py` keeps every callsign location, photo card, and
 imported QSO in one JSON object at `photocards/_index.json` in the same
@@ -242,7 +267,7 @@ the dashboard instead of storing them in the repo:
     "Statement": [
       {
         "Effect": "Allow",
-        "Action": ["s3:PutObject", "s3:GetObject"],
+        "Action": ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"],
         "Resource": "arn:aws:s3:::kn0ble-qsl-.../photocards/*"
       },
       {
@@ -256,8 +281,10 @@ the dashboard instead of storing them in the repo:
     ]
   }
   ```
-  (swap in the real bucket name; no account-wide access needed). The
-  `ListBucket` statement is scoped to just the `photocards/*` prefix
+  (swap in the real bucket name; no account-wide access needed).
+  `s3:DeleteObject` is required, or removing a photo or a card leaves
+  the object in the bucket (the metadata row goes away, the file does
+  not). The `ListBucket` statement is scoped to just the `photocards/*` prefix
   via the `StringLike` condition -- it's needed because S3 returns
   `AccessDenied` instead of a clean 404 on `GetObject` for a
   not-yet-existing key (like `photocards/_index.json` on first run)
@@ -291,6 +318,17 @@ Early / brainstorming-to-working-prototype stage. Next up:
       (see "Email notifications" above)
 - [x] QSL Photo Map -- public `/photomap` (world map of scanned cards)
       plus an admin-only upload/import flow; see "QSL Photo Map" above
+
+## Tests
+
+```bash
+python3 -m unittest discover -s tests -t . -v
+```
+
+The tests use a throwaway SQLite file and stand-ins for S3 and QRZ.
+They do not contact AWS, QRZ, or Resend. `QSL_DB_PATH` and
+`SESSION_COOKIE_SECURE` are set by the test harness; you don't need
+to export them yourself.
 
 ## License
 
