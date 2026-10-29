@@ -22,9 +22,10 @@ Minimal client for two separate QRZ.com APIs:
 """
 from __future__ import annotations
 
+import html
+import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-import html
 from urllib.parse import unquote_plus
 
 import requests
@@ -423,22 +424,37 @@ def _logbook_fetch(api_key: str, option: str, timeout: float = 20) -> tuple[dict
     return fields, adif_text
 
 
-def fetch_all_logids(api_key: str) -> list[int]:
+def fetch_all_logids(api_key: str, timeout: float = 20) -> list[int]:
     """Every QSO's log id in the logbook, without the QSOs themselves
     (OPTION=ALL,TYPE:LOGIDS -- the docs allow TYPE alongside ALL). Used to
     find exactly which QRZ entries the app doesn't have."""
-    fields, _ = _logbook_fetch(api_key, "ALL,TYPE:LOGIDS")
+    fields, _ = _logbook_fetch(api_key, "ALL,TYPE:LOGIDS", timeout=timeout)
     raw = fields.get("LOGIDS", "")
     return [int(x) for x in raw.replace("+", ",").replace(" ", ",").split(",") if x.strip().isdigit()]
 
 
-def fetch_by_logids(api_key: str, logids: list[int]) -> str:
+def fetch_by_logids(api_key: str, logids: list[int], timeout: float = 20,
+                    deadline: float | None = None) -> tuple[str, int]:
     """ADIF for specific QSOs by log id (OPTION=LOGIDS:a+b+c), fetched in
-    batches of 50."""
+    batches of 50.
+
+    Returns (adif, how many ids were actually requested). Stops before a
+    batch that would start with less than a couple of seconds left before
+    `deadline` (a monotonic timestamp), so Find missing can return what
+    it has instead of running until the worker is killed."""
     chunks = []
+    requested = 0
     for i in range(0, len(logids), 50):
-        part = "+".join(str(x) for x in logids[i:i + 50])
-        _, adif_text = _logbook_fetch(api_key, f"LOGIDS:{part}")
+        batch = logids[i:i + 50]
+        call_timeout = timeout
+        if deadline is not None:
+            left = deadline - time.monotonic()
+            if left < 2:
+                break
+            call_timeout = min(timeout, left)
+        part = "+".join(str(x) for x in batch)
+        _, adif_text = _logbook_fetch(api_key, f"LOGIDS:{part}", timeout=call_timeout)
         chunks.append(adif_text)
-    return "\n".join(chunks)
+        requested += len(batch)
+    return "\n".join(chunks), requested
 

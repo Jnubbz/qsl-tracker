@@ -17,6 +17,7 @@ import secrets
 import time
 from datetime import date, datetime, timedelta
 from functools import wraps
+from urllib.parse import urlparse
 
 from flask import Flask, Response, abort, flash, redirect, render_template, request, session, url_for
 
@@ -38,7 +39,14 @@ from qrz import (
     lookup_location,
     status_total_qsos,
 )
-from s3 import S3Error, delete_object, get_object_bytes, upload_card_image
+from s3 import (
+    S3Error,
+    delete_object,
+    get_object_bytes,
+    image_type_for_key,
+    is_card_image_key,
+    upload_card_image,
+)
 
 # Without this, mailer.py's logger.warning()/logger.exception() calls for
 # the QSL request email (see /request-qsl below) wouldn't reliably show
@@ -51,6 +59,33 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    """True/false from an env var. Unset or blank keeps `default`."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+# 8 MB covers an ADIF log and a few card scans. Leave this unset and a
+# visitor can post a body large enough to fill the worker's memory.
+MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+
+app.config.update(
+    MAX_CONTENT_LENGTH=MAX_UPLOAD_BYTES,
+    SESSION_COOKIE_HTTPONLY=True,
+    # Lax: the cookie is sent on ordinary navigations to this site, and
+    # not on a cross-site POST. /request-qsl is the one form posted from
+    # kn0ble.com; it is exempt from CSRF below and does not receive this
+    # cookie on that cross-site submit.
+    SESSION_COOKIE_SAMESITE="Lax",
+    # Secure by default so a production cookie is HTTPS-only. Local
+    # http://127.0.0.1 needs SESSION_COOKIE_SECURE=0 or the browser
+    # drops the cookie. Render is HTTPS, so leave the var unset there.
+    SESSION_COOKIE_SECURE=_env_flag("SESSION_COOKIE_SECURE", True),
+)
 db.init_db()
 
 # Cap how many callsigns the Raw Address Ripper's ADIF bulk-add will
@@ -99,11 +134,17 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 QRZ_LOGBOOK_API_KEY = os.environ.get("QRZ_LOGBOOK_API_KEY", "")
 
 # A sync pages through the logbook synchronously, inside the request.
-# Gunicorn kills a worker after 30s by default, so stop starting new
-# pages after this many seconds (one page can still take up to the
-# request timeout in qrz.fetch_log_page()); the cursor is saved after
-# every page, so clicking Sync again just carries on from there.
+# Stop *starting* new pages after this many seconds (one page can still
+# take up to its own request timeout). The cursor is saved after every
+# page, so clicking Sync again carries on from there.
 QRZ_SYNC_TIME_BUDGET_SECONDS = 12
+
+# Hard ceiling for the whole sync or find-missing request, including a
+# page that starts just before the budget above and the recent-days
+# recheck / STATUS call. gunicorn's timeout in render.yaml (120s) is
+# the backstop so a slow call can't kill the worker mid-save; this
+# limit keeps one press from holding the only worker anywhere near that.
+QRZ_SYNC_HARD_LIMIT_SECONDS = 25
 
 # After an incremental sync catches up, re-read this many recent days by
 # date too -- see admin_log_sync().
@@ -132,6 +173,61 @@ def ensure_session():
     if "session_id" not in session:
         session["session_id"] = secrets.token_urlsafe(24)
     db.purge_expired()
+
+
+# /request-qsl is posted from plain HTML on kn0ble.com, which cannot
+# carry a token minted here. Every other POST must present the token
+# stored in the session (hidden form field or X-CSRF-Token).
+CSRF_EXEMPT_ENDPOINTS = frozenset({"request_qsl"})
+
+
+def _csrf_token() -> str:
+    token = session.get("_csrf_token")
+    if not isinstance(token, str) or not token:
+        token = secrets.token_urlsafe(32)
+        session["_csrf_token"] = token
+    return token
+
+
+def _csrf_ok() -> bool:
+    expected = session.get("_csrf_token")
+    sent = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token") or ""
+    if not isinstance(expected, str) or not expected or not isinstance(sent, str) or not sent:
+        return False
+    try:
+        return secrets.compare_digest(expected.encode("utf-8"), sent.encode("utf-8"))
+    except Exception:
+        return False
+
+
+@app.before_request
+def csrf_protect():
+    if request.method in ("GET", "HEAD", "OPTIONS", "TRACE"):
+        return None
+    if request.endpoint in CSRF_EXEMPT_ENDPOINTS:
+        return None
+    if _csrf_ok():
+        return None
+    abort(400, description="Missing or invalid CSRF token. Reload the page and try again.")
+
+
+@app.context_processor
+def inject_csrf():
+    return {"csrf_token": _csrf_token}
+
+
+@app.errorhandler(413)
+def request_too_large(_exc):
+    flash(f"That upload is too large. The limit is {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.", "error")
+    targets = {
+        "admin_log": "admin_log",
+        "admin_log_sync": "admin_log",
+        "admin_photomap_upload": "admin_photomap_upload",
+        "admin_photomap_edit": "admin_photomap_manage",
+        "raw_address_adif_batch": "raw_address",
+        "request_qsl": "request_qsl",
+    }
+    return redirect(url_for(targets.get(request.endpoint, "index")))
 
 
 def current_auth():
@@ -600,7 +696,7 @@ def admin_login():
     earlier /login) does the password step show. Both steps land back
     on `next` when done, and a QRZ session already established via the
     main site's /login skips the QRZ step here entirely."""
-    next_url = request.values.get("next") or url_for("admin_qso_label")
+    next_url = _safe_redirect(request.values.get("next"), url_for("admin_qso_label"))
 
     if request.method == "POST" and "qrz_username" in request.form:
         key = qrz_login_attempt(
@@ -617,7 +713,7 @@ def admin_login():
         if not ADMIN_PASSWORD:
             flash("Admin login isn't configured yet (ADMIN_PASSWORD isn't set on the server).", "error")
             return render_template("admin_login.html", next=next_url, stage="password")
-        if not secrets.compare_digest(password, ADMIN_PASSWORD):
+        if not _password_matches(password, ADMIN_PASSWORD):
             flash("Wrong password.", "error")
             return render_template("admin_login.html", next=next_url, stage="password")
         session["is_admin"] = True
@@ -663,21 +759,58 @@ def _next_free_position(used: set, count: int) -> int | None:
     return None
 
 
+def _is_local_path(target: object) -> bool:
+    """True for a same-origin path. Rejects absolute URLs, protocol-
+    relative URLs (`//host`), and backslash forms (`/\\host`) that
+    browsers treat the same way. Also rejects control characters, which
+    would be a response-splitting trick in a Location header."""
+    if not isinstance(target, str) or not target:
+        return False
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in target):
+        return False
+    if "\\" in target:
+        return False
+    if not target.startswith("/") or target.startswith("//"):
+        return False
+    parsed = urlparse(target)
+    return not parsed.scheme and not parsed.netloc
+
+
+def _safe_redirect(target: object, fallback: str) -> str:
+    if isinstance(target, str) and _is_local_path(target):
+        return target
+    return fallback
+
+
 def _safe_next(fallback: str) -> str:
     """Where a batch add/remove/clear form should redirect back to.
     Every such form's default target is its own page (`fallback`,
     already a same-app url_for(...) result) -- but the browse-by-DXCC
-    page (admin_qsos()) also points these same forms at itself via a
-    hidden `next` field, so adding/removing from there doesn't bounce
-    Josh away to the single-lookup page. Only ever trusts a `next` that
-    is a path on this app (starts with exactly one leading "/", never
-    "//" which browsers treat as protocol-relative -- i.e. off-site);
-    anything else is quietly ignored in favor of the normal fallback,
-    same as if `next` had never been sent."""
-    target = request.form.get("next", "")
-    if target.startswith("/") and not target.startswith("//"):
-        return target
-    return fallback
+    page also points these same forms at itself via a hidden `next`
+    field, so adding/removing from there doesn't bounce Josh away.
+    Only a same-app path is trusted; see _is_local_path()."""
+    return _safe_redirect(request.form.get("next", ""), fallback)
+
+
+def _sync_timeout(started_at: float, cap: float) -> float | None:
+    """Seconds to give the next QRZ call, or None if there isn't time
+    to start one and still finish inside QRZ_SYNC_HARD_LIMIT_SECONDS."""
+    remaining = QRZ_SYNC_HARD_LIMIT_SECONDS - (time.monotonic() - started_at)
+    if remaining < 2:
+        return None
+    return max(1.0, min(cap, remaining - 1))
+
+
+def _password_matches(provided: str, expected: str) -> bool:
+    """Constant-time compare that accepts non-ASCII passwords.
+
+    secrets.compare_digest rejects non-ASCII *str* with TypeError (and
+    that 500'd admin login). Comparing the UTF-8 bytes keeps the
+    constant-time check and treats any encoding failure as a mismatch."""
+    try:
+        return secrets.compare_digest(provided.encode("utf-8"), expected.encode("utf-8"))
+    except Exception:
+        return False
 
 
 @app.route("/admin/qso-label")
@@ -1207,28 +1340,62 @@ def admin_log_missing():
     for: list every QRZ log id (TYPE:LOGIDS, no QSO data), subtract the
     ids already attached to rows (or recorded as QRZ-side duplicates),
     fetch just the leftovers by id, and show what an import would do
-    with each. With `import=1`, also imports the ones that are new.
+    with each. With `import=1`, imports the ones that are new and records the ones
+    that are a second QRZ copy of a contact already here (those used to
+    stay "missing" forever, because this path never passed qrz_dupes).
     Read-only otherwise."""
     if not QRZ_LOGBOOK_API_KEY:
         flash("QRZ sync isn't set up yet (QRZ_LOGBOOK_API_KEY).", "error")
         return redirect(url_for("admin_log"))
-    report = {"error": None}
+    started_at = time.monotonic()
+    report = {"error": None, "truncated": False}
     try:
-        qrz_ids = fetch_all_logids(QRZ_LOGBOOK_API_KEY)
+        timeout = _sync_timeout(started_at, 20)
+        if timeout is None:
+            report["error"] = "Not enough time left to ask QRZ. Try again."
+            return _render_log_page(missing_report=report)
+        qrz_ids = fetch_all_logids(QRZ_LOGBOOK_API_KEY, timeout=timeout)
         have = photomap_store.stored_qrz_logids()
         missing_ids = sorted(i for i in set(qrz_ids) if str(i) not in have)
         report.update(qrz_listed=len(set(qrz_ids)), accounted=len(have & {str(i) for i in qrz_ids}),
                       missing_count=len(missing_ids))
         shown = missing_ids[:MISSING_QSO_REPORT_CAP]
-        adif_text = fetch_by_logids(QRZ_LOGBOOK_API_KEY, shown) if shown else ""
+        if shown:
+            adif_text, requested = fetch_by_logids(
+                QRZ_LOGBOOK_API_KEY,
+                shown,
+                timeout=20,
+                deadline=started_at + QRZ_SYNC_HARD_LIMIT_SECONDS,
+            )
+        else:
+            adif_text, requested = "", 0
+        if requested < len(shown):
+            report["truncated"] = True
+            shown = shown[:requested]
         qsos = parse_adif(adif_text) if adif_text else []
         report["sent"] = adif_text.lower().count("<eor>") if adif_text else 0
         report["rows"] = photomap_store.explain_qsos(qsos)
         returned = {str(r["logid"]) for r in report["rows"]}
         report["not_returned"] = [i for i in shown if str(i) not in returned]
         if request.form.get("import") == "1" and qsos:
-            added, backfilled = photomap_store.import_my_qsos(qsos)
-            flash(f"Imported {added} of the missing QSOs.", "success" if added else "error")
+            dupes = set(photomap_store.qrz_sync_state().get("qrz_dupe_logids") or [])
+            before = set(dupes)
+            added, backfilled = photomap_store.import_my_qsos(qsos, dupes)
+            if dupes != before:
+                photomap_store.save_qrz_sync_state({"qrz_dupe_logids": sorted(dupes)})
+            marked = len(dupes - before)
+            bits = []
+            if added:
+                bits.append(f"Imported {added} new QSO(s)")
+            if marked:
+                bits.append(f"marked {marked} as QRZ duplicates")
+            if backfilled:
+                bits.append(f"filled in {backfilled} already here")
+            if bits:
+                text = ", ".join(bits)
+                flash(text[0].upper() + text[1:] + ".", "success")
+            else:
+                flash("Imported 0 of the missing QSOs.", "error")
             return redirect(url_for("admin_log"))
     except QrzError as exc:
         report["error"] = str(exc)
@@ -1276,16 +1443,27 @@ def admin_log_sync():
         # Carry on an unfinished "Re-sync everything" walk where it stopped.
         cursor = int(state.get("next_logid") or 0)
         mode = "full"
-    elif state.get("caught_up"):
-        # Normal incremental sync: only QSOs QRZ has added since last time.
+    elif state.get("caught_up") or state.get("mode") == "incremental":
+        # Normal incremental sync, or one that stopped partway (time
+        # budget, a QRZ error, or the worker being killed). Resume the
+        # AFTERLOGID cursor with no date window. Treating a partial
+        # incremental as a first sync used to open a window from the
+        # newest stored date, then jump the cursor past anything QRZ
+        # received in between with an older QSO date.
         cursor = int(state.get("next_logid") or 0)
+        mode = "incremental"
     else:
-        # First sync (or an unfinished one): if the log already holds an
-        # ADIF import, don't walk the whole QRZ logbook -- only ask for
-        # QSOs dated from the newest one already here (minus a day of
-        # overlap; duplicates are skipped anyway). Once this catches up,
-        # later syncs switch to plain AFTERLOGID paging above.
-        since = state.get("since")
+        # First sync (or an unfinished date-window one): if the log
+        # already holds an ADIF import, don't walk the whole QRZ logbook
+        # -- only ask for QSOs dated from the newest one already here
+        # (minus a day of overlap; duplicates are skipped anyway). Once
+        # this catches up, later syncs switch to plain AFTERLOGID paging
+        # above.
+        today_iso = date.today().isoformat()
+        saved_since = state.get("since") or ""
+        # A saved window that starts in the future never matches anything
+        # and used to freeze every later sync on that same window.
+        since = saved_since if saved_since and saved_since <= today_iso else None
         if not since:
             try:
                 newest = photomap_store.newest_qso_date()
@@ -1312,8 +1490,13 @@ def admin_log_sync():
     while True:
         if pages and time.monotonic() - started_at > QRZ_SYNC_TIME_BUDGET_SECONDS:
             break
+        page_timeout = _sync_timeout(started_at, 12)
+        if page_timeout is None:
+            break
         try:
-            adif_text = fetch_log_page(QRZ_LOGBOOK_API_KEY, cursor, since=since, until=until)
+            adif_text = fetch_log_page(
+                QRZ_LOGBOOK_API_KEY, cursor, timeout=page_timeout, since=since, until=until
+            )
         except QrzError as exc:
             error = str(exc)
             break
@@ -1329,6 +1512,20 @@ def admin_log_sync():
         sent = adif_text.lower().count("<eor>") if adif_text else 0
         unparsed += max(0, sent - len(qsos))
         pages += 1
+        if sent and not qsos:
+            # QRZ sent records and none of them parsed. Marking this
+            # caught up (the old behavior) would leave the cursor where
+            # it is and never retry the page.
+            logger.warning(
+                "QRZ sync: page at AFTERLOGID %s returned %d record(s) and none of them parsed",
+                cursor, sent,
+            )
+            error = (
+                "QRZ returned a page of records that couldn't be read, so the sync "
+                "stopped instead of skipping past them. The callsign and log id, "
+                "when the record had them, are in the server logs."
+            )
+            break
         if not qsos:
             caught_up = True
             break
@@ -1379,18 +1576,27 @@ def admin_log_sync():
     # would be skipped forever. So once caught up, also re-read the last
     # few days by date (normally one small request; duplicates skipped).
     recent_added = 0
-    if (caught_up and not error and mode == "incremental"
-            and time.monotonic() - started_at < QRZ_SYNC_TIME_BUDGET_SECONDS + 6):
+    if caught_up and not error and mode == "incremental":
         recent_since = (date.today() - timedelta(days=QRZ_SYNC_RECENT_DAYS)).isoformat()
         recent_until = (date.today() + timedelta(days=2)).isoformat()
         recent_cursor = 0
         try:
             for _ in range(4):  # a few pages at most -- days, not the whole log
-                adif_text = fetch_log_page(QRZ_LOGBOOK_API_KEY, recent_cursor,
-                                           since=recent_since, until=recent_until)
+                page_timeout = _sync_timeout(started_at, 12)
+                if page_timeout is None:
+                    break
+                adif_text = fetch_log_page(
+                    QRZ_LOGBOOK_API_KEY, recent_cursor, timeout=page_timeout,
+                    since=recent_since, until=recent_until,
+                )
                 qsos = parse_adif(adif_text) if adif_text else []
                 sent = adif_text.lower().count("<eor>") if adif_text else 0
                 unparsed += max(0, sent - len(qsos))
+                if sent and not qsos:
+                    logger.warning(
+                        "QRZ recent-days recheck: %d record(s) failed to parse", sent
+                    )
+                    break
                 if not qsos:
                     break
                 a_, b_ = photomap_store.import_my_qsos(qsos, qrz_dupes)
@@ -1409,9 +1615,10 @@ def admin_log_sync():
 
     # QRZ's own count, so the page can say whether the two actually match.
     qrz_total = None
-    if not error and time.monotonic() - started_at < QRZ_SYNC_TIME_BUDGET_SECONDS + 10:
+    status_timeout = None if error else _sync_timeout(started_at, 10)
+    if status_timeout is not None:
         try:
-            qrz_total = status_total_qsos(fetch_status(QRZ_LOGBOOK_API_KEY))
+            qrz_total = status_total_qsos(fetch_status(QRZ_LOGBOOK_API_KEY, timeout=status_timeout))
         except Exception as exc:
             logger.warning("QRZ Logbook STATUS failed: %s", exc)
     if qrz_total is not None:
@@ -1449,11 +1656,18 @@ def admin_log_sync():
     elif not error:
         parts.append(
             "Stopped partway to stay under the server's time limit -- press Sync again to keep going"
-            + (" (it picks up the full re-read where it left off)." if mode == "full" else ".")
+            + (
+                " (it picks up the full re-read where it left off)."
+                if mode == "full"
+                else " (it keeps the same place in the log, including older-dated QSOs)."
+            )
         )
     if unparsed:
-        parts.append(f"{unparsed} record(s) from QRZ couldn't be read and were skipped (see Render logs).")
         logger.warning("QRZ sync: %d record(s) failed to parse", unparsed)
+        if not error:
+            parts.append(
+                f"{unparsed} record(s) from QRZ couldn't be read and were skipped (see the server logs)."
+            )
     if caught_up and not error and qrz_total is not None:
         try:
             here = photomap_store.count_my_qsos()
@@ -1461,8 +1675,11 @@ def admin_log_sync():
             here = None
         if here is not None and here + len(qrz_dupes) < qrz_total:
             parts.append(
-                f"QRZ has {qrz_total} QSOs, this log has {here} -- press "
-                "\"Re-sync everything\" on the Your log page to pull in the rest."
+                f"QRZ's STATUS reports {qrz_total} QSOs; this log has {here}"
+                + (f" plus {len(qrz_dupes)} QRZ duplicate ids" if qrz_dupes else "")
+                + ". Use \"Find missing QSOs\" for the exact gap -- that STATUS total "
+                "can include entries the id list doesn't return, and this log can "
+                "include ADIF contacts that were never uploaded to QRZ."
             )
     if error:
         parts.append(error)
@@ -1620,14 +1837,18 @@ def admin_photomap_edit(card_id):
         removed = 0
         for s3_key in request.form.getlist("remove_image"):
             try:
-                photomap_store.remove_photo_card_image(card_id, s3_key)
+                # Only delete the object after the key was actually
+                # attached to this card. A posted key that isn't on the
+                # card (including the JSON index) is ignored.
+                if not photomap_store.remove_photo_card_image(card_id, s3_key):
+                    continue
                 delete_object(s3_key)
                 removed += 1
             except S3Error:
                 # The card's metadata is already updated even if the S3
                 # delete itself fails -- a leftover orphaned object in
                 # the bucket isn't worth blocking the save over.
-                pass
+                logger.warning("Couldn't delete card photo %s", s3_key)
 
         added, failed = 0, 0
         for f in request.files.getlist("images"):
@@ -1678,7 +1899,7 @@ def admin_photomap_delete(card_id):
         try:
             delete_object(s3_key)
         except S3Error:
-            pass  # metadata's already gone; a leftover S3 object isn't worth blocking on
+            logger.warning("Couldn't delete card photo %s", s3_key)
 
     flash(f"Deleted {removed['callsign']}'s card.", "success")
     return redirect(url_for("admin_photomap_manage"))
@@ -1693,20 +1914,25 @@ def photomap():
 def photomap_image(key):
     """Serves a QSL card photo's bytes straight from S3 through Flask,
     instead of redirecting the browser to a presigned S3 URL -- see
-    get_object_bytes() in s3.py for why. Restricted to the photocards/
-    prefix: this route takes a raw S3 key from the URL path, so it's
-    deliberately not a general "fetch any object" proxy."""
-    if not key.startswith("photocards/"):
+    get_object_bytes() in s3.py for why.
+
+    The key comes from the URL, so this is not a general "fetch any
+    object" proxy. Only a card image key is served. photocards/_index.json
+    lives under the same prefix and holds the whole log; it must 404."""
+    if not is_card_image_key(key):
         abort(404)
     try:
-        body, content_type = get_object_bytes(key)
+        body, _stored_type = get_object_bytes(key)
     except S3Error as exc:
         logger.warning("QSL Photo Map S3 error: %s", exc)
         abort(404)
     return Response(
         body,
-        mimetype=content_type,
-        headers={"Cache-Control": "public, max-age=86400"},
+        mimetype=image_type_for_key(key),
+        headers={
+            "Cache-Control": "public, max-age=86400",
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 

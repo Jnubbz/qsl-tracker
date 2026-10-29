@@ -11,6 +11,7 @@
         logged in to QRZ elsewhere on the site).
       </p>
       <form method="post" action="{{ url_for('admin_login') }}">
+{% include "_csrf.html" %}
         <input type="hidden" name="next" value="{{ next }}">
         <label for="qrz_username">QRZ username</label>
         <input type="text" id="qrz_username" name="qrz_username" autocomplete="username" required autofocus>
@@ -22,6 +23,7 @@
       <h1>Admin log in</h1>
       <p class="muted">This gates the QSL Photo Map's upload tools -- not the public site.</p>
       <form method="post" action="{{ url_for('admin_login') }}">
+{% include "_csrf.html" %}
         <input type="hidden" name="next" value="{{ next }}">
         <label for="password">Password</label>
         <input type="password" id="password" name="password" autocomplete="current-password" required autofocus>

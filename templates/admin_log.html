@@ -5,6 +5,7 @@
     <div class="dashboard-top">
       <h1>Your log</h1>
       <form method="post" action="{{ url_for('admin_logout') }}">
+{% include "_csrf.html" %}
         <button type="submit" class="link-button">Log out (admin)</button>
       </form>
     </div>
@@ -41,18 +42,22 @@
           QRZ Logbook: {{ sync_state.qrz_total }} QSOs &middot; this log: {{ qso_count }}
           {%- if dupes %} &middot; {{ dupes }} QRZ entr{{ 'y is a duplicate' if dupes == 1 else 'ies are duplicates' }}
             (same station, date, band and mode within 2 minutes of another entry), counted once here{% endif %}
-          {%- if missing > 0 %} &mdash; {{ missing }} missing here.
-            Press "Re-sync everything" (and Sync again until it says up to date) to pull them in.
+          {%- if missing > 0 %} &mdash; {{ missing }} not matched by this count.
+            Use "Find missing QSOs" below for the exact list. This STATUS total can
+            disagree with the id list, and this log can include ADIF contacts that
+            were never uploaded to QRZ.
           {%- elif missing == 0 %} &mdash; everything accounted for.
           {%- else %} &mdash; this log has QSOs QRZ doesn't (e.g. from an ADIF of contacts never uploaded to QRZ).{% endif %}
         </p>
       {% endif %}
       <form method="post" action="{{ url_for('admin_log_sync') }}" style="display: inline;">
+{% include "_csrf.html" %}
         <button type="submit">Sync from QRZ</button>
       </form>
       {% if sync_state.get('last_sync') %}
         <form method="post" action="{{ url_for('admin_log_sync') }}" style="display: inline;"
               onsubmit="return confirm('Re-read your whole QRZ Logbook from the start? Nothing gets duplicated. A big log takes a few presses: after this one, keep pressing Sync until it says up to date.');">
+{% include "_csrf.html" %}
           <input type="hidden" name="full" value="1">
           <button type="submit" class="link-button">Re-sync everything from the start</button>
         </form>
@@ -76,6 +81,7 @@
       choose to import.
     </p>
     <form method="post" action="{{ url_for('admin_log_missing') }}">
+{% include "_csrf.html" %}
       <button type="submit">Find missing QSOs</button>
     </form>
 
@@ -96,6 +102,7 @@
         </p>
         {% if r.rows %}
           {% set new_rows = r.rows | selectattr('outcome', 'equalto', 'new') | list %}
+          {% set match_rows = r.rows | selectattr('outcome', 'equalto', 'matches') | list %}
           <table class="contacts">
             <thead>
               <tr><th>QRZ id</th><th>Callsign</th><th>Date</th><th>Time</th><th>Band / Mode</th><th>Freq</th><th>What happens</th></tr>
@@ -124,12 +131,24 @@
               {% endfor %}
             </tbody>
           </table>
-          {% if new_rows %}
+          {% if new_rows or match_rows %}
             <form method="post" action="{{ url_for('admin_log_missing') }}" style="margin-top: 1rem;">
+{% include "_csrf.html" %}
               <input type="hidden" name="import" value="1">
-              <button type="submit">Import the {{ new_rows | length }} that aren't here</button>
+              <button type="submit">
+                {%- if new_rows and match_rows -%}
+                  Import {{ new_rows | length }} new and mark {{ match_rows | length }} as QRZ duplicates
+                {%- elif new_rows -%}
+                  Import the {{ new_rows | length }} that aren't here
+                {%- else -%}
+                  Mark {{ match_rows | length }} as QRZ duplicates
+                {%- endif -%}
+              </button>
             </form>
           {% endif %}
+        {% endif %}
+        {% if r.truncated %}
+          <p class="muted">Stopped early to stay under the server time limit. Run Find missing again to continue.</p>
         {% endif %}
         {% if r.not_returned %}
           <p class="flag-missing">
@@ -155,6 +174,7 @@
       the callsign prefix.
     </p>
     <form method="post" action="{{ url_for('admin_log') }}" enctype="multipart/form-data">
+{% include "_csrf.html" %}
       <label for="adif_file">ADIF log (.adi)</label>
       <input type="file" id="adif_file" name="adif_file" accept=".adi,.adif" required>
       <button type="submit">Import</button>

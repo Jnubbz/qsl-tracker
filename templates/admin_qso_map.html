@@ -55,6 +55,7 @@
     <div id="qmap-groups"></div>
 
     <form method="post" action="{{ url_for('admin_qso_label_batch_add_selected') }}" id="qmap-add-form" class="qmap-add-bar" hidden>
+{% include "_csrf.html" %}
       <input type="hidden" name="next" id="qmap-next" value="{{ url_for('admin_qso_map') }}">
       {% if batch_full %}
         <span class="muted">Label sheet full ({{ label_count }} of {{ label_count }}) &mdash; download or clear it to add more.</span>
@@ -69,6 +70,7 @@
      callsign filled in on click) into the Raw Address Ripper batch. #}
   {% if has_qrz_session %}
     <form method="post" action="{{ url_for('raw_address_batch_add') }}" id="qmap-address-form" hidden>
+{% include "_csrf.html" %}
       <input type="hidden" name="callsign" id="qmap-address-callsign">
       <input type="hidden" name="next" id="qmap-address-next" value="{{ url_for('admin_qso_map') }}">
     </form>
