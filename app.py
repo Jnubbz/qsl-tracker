@@ -134,11 +134,17 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 QRZ_LOGBOOK_API_KEY = os.environ.get("QRZ_LOGBOOK_API_KEY", "")
 
 # A sync pages through the logbook synchronously, inside the request.
-# Gunicorn kills a worker after 30s by default, so stop starting new
-# pages after this many seconds (one page can still take up to the
-# request timeout in qrz.fetch_log_page()); the cursor is saved after
-# every page, so clicking Sync again just carries on from there.
+# Stop *starting* new pages after this many seconds (one page can still
+# take up to its own request timeout). The cursor is saved after every
+# page, so clicking Sync again carries on from there.
 QRZ_SYNC_TIME_BUDGET_SECONDS = 12
+
+# Hard ceiling for the whole sync or find-missing request, including a
+# page that starts just before the budget above and the recent-days
+# recheck / STATUS call. gunicorn's timeout in render.yaml (120s) is
+# the backstop so a slow call can't kill the worker mid-save; this
+# limit keeps one press from holding the only worker anywhere near that.
+QRZ_SYNC_HARD_LIMIT_SECONDS = 25
 
 # After an incremental sync catches up, re-read this many recent days by
 # date too -- see admin_log_sync().
@@ -786,6 +792,15 @@ def _safe_next(fallback: str) -> str:
     return _safe_redirect(request.form.get("next", ""), fallback)
 
 
+def _sync_timeout(started_at: float, cap: float) -> float | None:
+    """Seconds to give the next QRZ call, or None if there isn't time
+    to start one and still finish inside QRZ_SYNC_HARD_LIMIT_SECONDS."""
+    remaining = QRZ_SYNC_HARD_LIMIT_SECONDS - (time.monotonic() - started_at)
+    if remaining < 2:
+        return None
+    return max(1.0, min(cap, remaining - 1))
+
+
 def _password_matches(provided: str, expected: str) -> bool:
     """Constant-time compare that accepts non-ASCII passwords.
 
@@ -1325,28 +1340,62 @@ def admin_log_missing():
     for: list every QRZ log id (TYPE:LOGIDS, no QSO data), subtract the
     ids already attached to rows (or recorded as QRZ-side duplicates),
     fetch just the leftovers by id, and show what an import would do
-    with each. With `import=1`, also imports the ones that are new.
+    with each. With `import=1`, imports the ones that are new and records the ones
+    that are a second QRZ copy of a contact already here (those used to
+    stay "missing" forever, because this path never passed qrz_dupes).
     Read-only otherwise."""
     if not QRZ_LOGBOOK_API_KEY:
         flash("QRZ sync isn't set up yet (QRZ_LOGBOOK_API_KEY).", "error")
         return redirect(url_for("admin_log"))
-    report = {"error": None}
+    started_at = time.monotonic()
+    report = {"error": None, "truncated": False}
     try:
-        qrz_ids = fetch_all_logids(QRZ_LOGBOOK_API_KEY)
+        timeout = _sync_timeout(started_at, 20)
+        if timeout is None:
+            report["error"] = "Not enough time left to ask QRZ. Try again."
+            return _render_log_page(missing_report=report)
+        qrz_ids = fetch_all_logids(QRZ_LOGBOOK_API_KEY, timeout=timeout)
         have = photomap_store.stored_qrz_logids()
         missing_ids = sorted(i for i in set(qrz_ids) if str(i) not in have)
         report.update(qrz_listed=len(set(qrz_ids)), accounted=len(have & {str(i) for i in qrz_ids}),
                       missing_count=len(missing_ids))
         shown = missing_ids[:MISSING_QSO_REPORT_CAP]
-        adif_text = fetch_by_logids(QRZ_LOGBOOK_API_KEY, shown) if shown else ""
+        if shown:
+            adif_text, requested = fetch_by_logids(
+                QRZ_LOGBOOK_API_KEY,
+                shown,
+                timeout=20,
+                deadline=started_at + QRZ_SYNC_HARD_LIMIT_SECONDS,
+            )
+        else:
+            adif_text, requested = "", 0
+        if requested < len(shown):
+            report["truncated"] = True
+            shown = shown[:requested]
         qsos = parse_adif(adif_text) if adif_text else []
         report["sent"] = adif_text.lower().count("<eor>") if adif_text else 0
         report["rows"] = photomap_store.explain_qsos(qsos)
         returned = {str(r["logid"]) for r in report["rows"]}
         report["not_returned"] = [i for i in shown if str(i) not in returned]
         if request.form.get("import") == "1" and qsos:
-            added, backfilled = photomap_store.import_my_qsos(qsos)
-            flash(f"Imported {added} of the missing QSOs.", "success" if added else "error")
+            dupes = set(photomap_store.qrz_sync_state().get("qrz_dupe_logids") or [])
+            before = set(dupes)
+            added, backfilled = photomap_store.import_my_qsos(qsos, dupes)
+            if dupes != before:
+                photomap_store.save_qrz_sync_state({"qrz_dupe_logids": sorted(dupes)})
+            marked = len(dupes - before)
+            bits = []
+            if added:
+                bits.append(f"Imported {added} new QSO(s)")
+            if marked:
+                bits.append(f"marked {marked} as QRZ duplicates")
+            if backfilled:
+                bits.append(f"filled in {backfilled} already here")
+            if bits:
+                text = ", ".join(bits)
+                flash(text[0].upper() + text[1:] + ".", "success")
+            else:
+                flash("Imported 0 of the missing QSOs.", "error")
             return redirect(url_for("admin_log"))
     except QrzError as exc:
         report["error"] = str(exc)
@@ -1394,16 +1443,27 @@ def admin_log_sync():
         # Carry on an unfinished "Re-sync everything" walk where it stopped.
         cursor = int(state.get("next_logid") or 0)
         mode = "full"
-    elif state.get("caught_up"):
-        # Normal incremental sync: only QSOs QRZ has added since last time.
+    elif state.get("caught_up") or state.get("mode") == "incremental":
+        # Normal incremental sync, or one that stopped partway (time
+        # budget, a QRZ error, or the worker being killed). Resume the
+        # AFTERLOGID cursor with no date window. Treating a partial
+        # incremental as a first sync used to open a window from the
+        # newest stored date, then jump the cursor past anything QRZ
+        # received in between with an older QSO date.
         cursor = int(state.get("next_logid") or 0)
+        mode = "incremental"
     else:
-        # First sync (or an unfinished one): if the log already holds an
-        # ADIF import, don't walk the whole QRZ logbook -- only ask for
-        # QSOs dated from the newest one already here (minus a day of
-        # overlap; duplicates are skipped anyway). Once this catches up,
-        # later syncs switch to plain AFTERLOGID paging above.
-        since = state.get("since")
+        # First sync (or an unfinished date-window one): if the log
+        # already holds an ADIF import, don't walk the whole QRZ logbook
+        # -- only ask for QSOs dated from the newest one already here
+        # (minus a day of overlap; duplicates are skipped anyway). Once
+        # this catches up, later syncs switch to plain AFTERLOGID paging
+        # above.
+        today_iso = date.today().isoformat()
+        saved_since = state.get("since") or ""
+        # A saved window that starts in the future never matches anything
+        # and used to freeze every later sync on that same window.
+        since = saved_since if saved_since and saved_since <= today_iso else None
         if not since:
             try:
                 newest = photomap_store.newest_qso_date()
@@ -1430,8 +1490,13 @@ def admin_log_sync():
     while True:
         if pages and time.monotonic() - started_at > QRZ_SYNC_TIME_BUDGET_SECONDS:
             break
+        page_timeout = _sync_timeout(started_at, 12)
+        if page_timeout is None:
+            break
         try:
-            adif_text = fetch_log_page(QRZ_LOGBOOK_API_KEY, cursor, since=since, until=until)
+            adif_text = fetch_log_page(
+                QRZ_LOGBOOK_API_KEY, cursor, timeout=page_timeout, since=since, until=until
+            )
         except QrzError as exc:
             error = str(exc)
             break
@@ -1447,6 +1512,20 @@ def admin_log_sync():
         sent = adif_text.lower().count("<eor>") if adif_text else 0
         unparsed += max(0, sent - len(qsos))
         pages += 1
+        if sent and not qsos:
+            # QRZ sent records and none of them parsed. Marking this
+            # caught up (the old behavior) would leave the cursor where
+            # it is and never retry the page.
+            logger.warning(
+                "QRZ sync: page at AFTERLOGID %s returned %d record(s) and none of them parsed",
+                cursor, sent,
+            )
+            error = (
+                "QRZ returned a page of records that couldn't be read, so the sync "
+                "stopped instead of skipping past them. The callsign and log id, "
+                "when the record had them, are in the server logs."
+            )
+            break
         if not qsos:
             caught_up = True
             break
@@ -1497,18 +1576,27 @@ def admin_log_sync():
     # would be skipped forever. So once caught up, also re-read the last
     # few days by date (normally one small request; duplicates skipped).
     recent_added = 0
-    if (caught_up and not error and mode == "incremental"
-            and time.monotonic() - started_at < QRZ_SYNC_TIME_BUDGET_SECONDS + 6):
+    if caught_up and not error and mode == "incremental":
         recent_since = (date.today() - timedelta(days=QRZ_SYNC_RECENT_DAYS)).isoformat()
         recent_until = (date.today() + timedelta(days=2)).isoformat()
         recent_cursor = 0
         try:
             for _ in range(4):  # a few pages at most -- days, not the whole log
-                adif_text = fetch_log_page(QRZ_LOGBOOK_API_KEY, recent_cursor,
-                                           since=recent_since, until=recent_until)
+                page_timeout = _sync_timeout(started_at, 12)
+                if page_timeout is None:
+                    break
+                adif_text = fetch_log_page(
+                    QRZ_LOGBOOK_API_KEY, recent_cursor, timeout=page_timeout,
+                    since=recent_since, until=recent_until,
+                )
                 qsos = parse_adif(adif_text) if adif_text else []
                 sent = adif_text.lower().count("<eor>") if adif_text else 0
                 unparsed += max(0, sent - len(qsos))
+                if sent and not qsos:
+                    logger.warning(
+                        "QRZ recent-days recheck: %d record(s) failed to parse", sent
+                    )
+                    break
                 if not qsos:
                     break
                 a_, b_ = photomap_store.import_my_qsos(qsos, qrz_dupes)
@@ -1527,9 +1615,10 @@ def admin_log_sync():
 
     # QRZ's own count, so the page can say whether the two actually match.
     qrz_total = None
-    if not error and time.monotonic() - started_at < QRZ_SYNC_TIME_BUDGET_SECONDS + 10:
+    status_timeout = None if error else _sync_timeout(started_at, 10)
+    if status_timeout is not None:
         try:
-            qrz_total = status_total_qsos(fetch_status(QRZ_LOGBOOK_API_KEY))
+            qrz_total = status_total_qsos(fetch_status(QRZ_LOGBOOK_API_KEY, timeout=status_timeout))
         except Exception as exc:
             logger.warning("QRZ Logbook STATUS failed: %s", exc)
     if qrz_total is not None:
@@ -1567,11 +1656,18 @@ def admin_log_sync():
     elif not error:
         parts.append(
             "Stopped partway to stay under the server's time limit -- press Sync again to keep going"
-            + (" (it picks up the full re-read where it left off)." if mode == "full" else ".")
+            + (
+                " (it picks up the full re-read where it left off)."
+                if mode == "full"
+                else " (it keeps the same place in the log, including older-dated QSOs)."
+            )
         )
     if unparsed:
-        parts.append(f"{unparsed} record(s) from QRZ couldn't be read and were skipped (see Render logs).")
         logger.warning("QRZ sync: %d record(s) failed to parse", unparsed)
+        if not error:
+            parts.append(
+                f"{unparsed} record(s) from QRZ couldn't be read and were skipped (see the server logs)."
+            )
     if caught_up and not error and qrz_total is not None:
         try:
             here = photomap_store.count_my_qsos()
@@ -1579,8 +1675,11 @@ def admin_log_sync():
             here = None
         if here is not None and here + len(qrz_dupes) < qrz_total:
             parts.append(
-                f"QRZ has {qrz_total} QSOs, this log has {here} -- press "
-                "\"Re-sync everything\" on the Your log page to pull in the rest."
+                f"QRZ's STATUS reports {qrz_total} QSOs; this log has {here}"
+                + (f" plus {len(qrz_dupes)} QRZ duplicate ids" if qrz_dupes else "")
+                + ". Use \"Find missing QSOs\" for the exact gap -- that STATUS total "
+                "can include entries the id list doesn't return, and this log can "
+                "include ADIF contacts that were never uploaded to QRZ."
             )
     if error:
         parts.append(error)

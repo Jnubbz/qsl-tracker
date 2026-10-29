@@ -4,7 +4,12 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    # One worker: the log is a single JSON object, and overlapping saves
+    # are retried via S3 If-Match, but a second worker is not useful on
+    # the free plan. Timeout 120 so a sync is not killed mid-page (the
+    # app still stops itself well inside that). Do not drop --workers 1
+    # if you change this command.
+    startCommand: gunicorn app:app --workers 1 --timeout 120
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
@@ -37,4 +42,9 @@ services:
       - key: AWS_SECRET_ACCESS_KEY
         sync: false
       - key: ADMIN_PASSWORD
+        sync: false
+      # QRZ.com -> Logbook -> Settings -> API. Sync from QRZ does nothing
+      # without it. sync: false prompts in the dashboard and does not
+      # overwrite a value already saved there.
+      - key: QRZ_LOGBOOK_API_KEY
         sync: false

@@ -46,9 +46,15 @@ A small Flask app for hams, part of [KN0BLE.com](https://kn0ble.com):
 - **QRZ Logbook sync** pages through the whole logbook with
   `OPTION=MAX:250,AFTERLOGID:n` (QRZ's documented pagination), saving
   the cursor after every page, so the first sync walks everything and
-  later ones fetch only new QSOs. It deliberately never uses QRZ's
-  `CALL:` filter, which returned nothing in testing. Needs
-  `QRZ_LOGBOOK_API_KEY` (QRZ.com -> Logbook -> Settings -> API).
+  later ones fetch only new QSOs. A sync that stops partway resumes
+  from that log id on the next press, including QSOs whose dates are
+  older than the newest row already stored. "Find missing QSOs" can
+  record a second QRZ copy of a contact already here, so those ids
+  stop showing up as missing. A QSO date in the future is ignored when
+  the first sync picks its date window, so one bad date cannot freeze
+  sync. It deliberately never uses QRZ's `CALL:` filter, which returned
+  nothing in testing. Needs `QRZ_LOGBOOK_API_KEY` (QRZ.com -> Logbook
+  -> Settings -> API).
 - `/request-qsl` is a separate, public, unauthenticated form (no QRZ
   login needed) for the reverse case: someone worked KN0BLE and wants a
   card mailed back to *them*. It's embedded directly on kn0ble.com
@@ -100,13 +106,26 @@ config automatically:
 1. In the [Render dashboard](https://dashboard.render.com), **New +** ->
    **Blueprint**, and point it at this repo.
 2. Render reads `render.yaml`, provisions a free web service running
-   `gunicorn app:app`, and auto-generates a stable `SECRET_KEY` env var
-   (important: without a fixed `SECRET_KEY`, each gunicorn worker process
-   would get its own random key and session cookies would break
-   intermittently depending on which worker handles a request).
+   `gunicorn app:app --workers 1 --timeout 120`, and auto-generates a
+   stable `SECRET_KEY` env var (important: without a fixed `SECRET_KEY`,
+   each gunicorn worker process would get its own random key and session
+   cookies would break intermittently depending on which worker handles
+   a request).
 3. Deploy. Render gives you a `*.onrender.com` URL; a custom domain
    (e.g. a `qsl` subdomain of kn0ble.com) can be attached afterward from
-   the service's Settings tab.
+   the service's Settings tab. Re-applying the blueprint prompts for
+   `QRZ_LOGBOOK_API_KEY` if it is not already set. It does not overwrite
+   a value already saved in the dashboard.
+
+The start command pins **one worker** and a **120 second** timeout.
+One worker is deliberate: the log is one JSON object in S3. Overlapping
+saves retry (S3 `If-Match`, which needs boto3 1.37 or newer --
+`requirements.txt` already requires that, and no extra IAM action
+beyond `s3:PutObject`), so a lost race does not erase QSOs, but a
+second worker is not useful on the free plan. The longer timeout is so
+gunicorn does not kill a sync mid-page. The sync still stops itself
+well inside that limit and asks you to press Sync again. If you change
+the start command, keep `--workers 1` and a timeout of at least 120.
 
 **Storage note:** the free plan's disk is ephemeral -- a redeploy or a
 spin-down after inactivity wipes `instance/qsl_tracker.db`. Given results
@@ -243,7 +262,9 @@ those same image types; the browser's content type is not trusted.
 `photomap_store.py` keeps every callsign location, photo card, and
 imported QSO in one JSON object at `photocards/_index.json` in the same
 bucket (deliberately inside the `photocards/` prefix the IAM policy
-below already covers, so this needed no extra AWS setup). This is the
+below already covers, so this needed no extra AWS setup). Each save is
+conditional on the object's ETag, so two requests writing at once
+retry instead of the later one wiping the earlier one's QSOs. This is the
 one part of the app that can't afford Render's free-tier ephemeral
 disk -- everything else (`contacts`, `auth_sessions`, `qsl_requests`)
 is fine being short-lived, but the whole point of the QSL Photo Map is

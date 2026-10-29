@@ -63,6 +63,10 @@ class S3Error(Exception):
     """Raised when an upload or presign call to S3 fails."""
 
 
+class S3Conflict(S3Error):
+    """A conditional write lost the race (S3 returned 412 or 409)."""
+
+
 def is_card_image_key(key: str) -> bool:
     """True only for photocards/<callsign>/<32 hex>.<image ext>.
 
@@ -167,18 +171,29 @@ def get_json(key: str):
     doesn't exist yet (a fresh bucket, or first run). Used by
     photomap_store.py to keep the QSL Photo Map's data durable without
     needing Render's (ephemeral, free-tier) disk at all."""
+    data, _etag = get_json_meta(key)
+    return data
+
+
+def get_json_meta(key: str) -> tuple[dict | None, str | None]:
+    """Like get_json, plus the object's ETag (quoted, as S3 sent it).
+
+    The ETag is None when the object does not exist. photomap_store
+    passes it back as If-Match so two overlapping saves can't silently
+    overwrite each other."""
     if not BUCKET:
         raise S3Error("S3_BUCKET isn't configured.")
     try:
         obj = _get_client().get_object(Bucket=BUCKET, Key=key)
-        return json.loads(obj["Body"].read().decode("utf-8"))
+        etag = obj.get("ETag")
+        return json.loads(obj["Body"].read().decode("utf-8")), etag
     except ClientError as exc:
         # Only ClientError (AWS actually responded) carries .response --
         # that's how a "the object doesn't exist yet" case is told apart
         # from a real failure below.
         code = exc.response.get("Error", {}).get("Code", "")
         if code in ("NoSuchKey", "404"):
-            return None
+            return None, None
         raise S3Error(str(exc)) from exc
     except BotoCoreError as exc:
         # No .response here -- this is boto3/botocore failing before a
@@ -219,16 +234,33 @@ def get_object_bytes(key: str) -> tuple[bytes, str]:
         raise S3Error(str(exc)) from exc
 
 
-def put_json(key: str, data) -> None:
-    """Write a JSON-serializable value to the bucket as an object."""
+def put_json(key: str, data, if_match: str | None = None, if_none_match: str | None = None) -> str | None:
+    """Write a JSON-serializable value to the bucket as an object.
+
+    `if_match` (the ETag from get_json_meta) makes the write fail with
+    S3Conflict when the object changed. `if_none_match="*"` creates the
+    object only if it is not there yet. Needs boto3 1.37 or newer,
+    which is what requirements.txt asks for. Returns the new ETag."""
     if not BUCKET:
         raise S3Error("S3_BUCKET isn't configured.")
+    kwargs = {
+        "Bucket": BUCKET,
+        "Key": key,
+        "Body": json.dumps(data, indent=2).encode("utf-8"),
+        "ContentType": "application/json",
+    }
+    if if_match is not None:
+        kwargs["IfMatch"] = if_match
+    if if_none_match is not None:
+        kwargs["IfNoneMatch"] = if_none_match
     try:
-        _get_client().put_object(
-            Bucket=BUCKET,
-            Key=key,
-            Body=json.dumps(data, indent=2).encode("utf-8"),
-            ContentType="application/json",
-        )
-    except (ClientError, BotoCoreError) as exc:
+        resp = _get_client().put_object(**kwargs)
+    except ClientError as exc:
+        status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+        code = exc.response.get("Error", {}).get("Code", "")
+        if status in (412, 409) or code in ("PreconditionFailed", "ConditionalRequestConflict"):
+            raise S3Conflict(str(exc)) from exc
         raise S3Error(str(exc)) from exc
+    except BotoCoreError as exc:
+        raise S3Error(str(exc)) from exc
+    return resp.get("ETag")
