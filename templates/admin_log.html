@@ -75,39 +75,45 @@
         explains the API key.
       </p>
     {% endif %}
-    {{ ui.logbook_tabs(section) }}
+    {#- One row of Logbook actions. "Sync from QRZ" is the action itself
+        (it posts straight to the sync route); the other two open their
+        panels below. There is no second Sync button further down. -#}
+    <div class="section-tabs log-actions">
+      <form method="post" action="{{ url_for('admin_log_sync') }}" class="inline-form">
+{% include "_csrf.html" %}
+        <button type="submit">Sync from QRZ</button>
+      </form>
+      <nav class="section-tabs" aria-label="Logbook tasks">
+        <a href="{{ url_for('admin_log', section='missing') }}"{% if section == 'missing' %} class="active" aria-current="page"{% endif %}>Find missing QSOs</a>
+        <a href="{{ url_for('admin_log', section='import') }}"{% if section == 'import' %} class="active" aria-current="page"{% endif %}>Import ADIF</a>
+      </nav>
+    </div>
   </section>
 
   {% if section == 'sync' %}
     <section class="card" id="log-panel-sync">
-      <h2>Sync from QRZ</h2>
+      <h2>How syncing works</h2>
       {% if logbook_configured %}
         <p class="muted">
-          Pulls your QRZ Logbook in pages of 250. If your log already has QSOs
+          <strong>Sync from QRZ</strong> (above) pulls your QRZ Logbook in pages of 250. If your log already has QSOs
           here (say, from an ADIF import), the first sync only asks QRZ for
           QSOs from your newest one onward{% if newest_qso_date %} ({{ newest_qso_date }}){% endif %};
           after that, each sync only fetches QSOs added to QRZ since last time.
           If a sync stops partway to stay under the server's time limit, press
           Sync again and it carries on where it left off.
         </p>
-        <div class="button-row">
-          <form method="post" action="{{ url_for('admin_log_sync') }}">
+        {% if sync_state.get('last_sync') %}
+          <form method="post" action="{{ url_for('admin_log_sync') }}"
+                onsubmit="return confirm('Re-read your whole QRZ Logbook from the start? Nothing gets duplicated. A big log takes a few presses: after this one, keep pressing Sync until it says up to date.');">
 {% include "_csrf.html" %}
-            <button type="submit">Sync from QRZ</button>
+            <input type="hidden" name="full" value="1">
+            <button type="submit" class="link-button">Re-sync everything from the start</button>
           </form>
-          {% if sync_state.get('last_sync') %}
-            <form method="post" action="{{ url_for('admin_log_sync') }}"
-                  onsubmit="return confirm('Re-read your whole QRZ Logbook from the start? Nothing gets duplicated. A big log takes a few presses: after this one, keep pressing Sync until it says up to date.');">
-{% include "_csrf.html" %}
-              <input type="hidden" name="full" value="1">
-              <button type="submit" class="link-button">Re-sync everything from the start</button>
-            </form>
-          {% endif %}
-        </div>
+        {% endif %}
       {% else %}
         <p class="flag-missing">
-          Not set up yet: add <code>QRZ_LOGBOOK_API_KEY</code> in Render's
-          Environment settings. Get the key from QRZ.com &rarr; Logbook &rarr;
+          Not set up yet: add <code>QRZ_LOGBOOK_API_KEY</code> in the
+          server's <code>.env</code> file. Get the key from QRZ.com &rarr; Logbook &rarr;
           Settings &rarr; API.
         </p>
       {% endif %}

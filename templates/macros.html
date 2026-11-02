@@ -74,11 +74,3 @@
     <a href="{{ url_for('admin_photomap_upload') }}"{% if active == 'upload' %} class="active" aria-current="page"{% endif %}>Upload</a>
   </nav>
 {%- endmacro %}
-
-{% macro logbook_tabs(active) -%}
-  <nav class="section-tabs" aria-label="Logbook tasks">
-    <a href="{{ url_for('admin_log', section='sync') }}"{% if active == 'sync' %} class="active" aria-current="page"{% endif %}>Sync from QRZ</a>
-    <a href="{{ url_for('admin_log', section='missing') }}"{% if active == 'missing' %} class="active" aria-current="page"{% endif %}>Find missing QSOs</a>
-    <a href="{{ url_for('admin_log', section='import') }}"{% if active == 'import' %} class="active" aria-current="page"{% endif %}>Import ADIF</a>
-  </nav>
-{%- endmacro %}

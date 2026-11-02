@@ -161,7 +161,10 @@ def test_logbook_sections_and_not_matched_link(client, monkeypatch):
     assert 'href="/admin/log?section=missing"' in sync_html
     assert "not matched" in sync_html
     assert "Your log" not in sync_html
-    assert ">Sync from QRZ</button>" in sync_html
+    # Exactly one Sync button on the page, and it posts to the sync route.
+    assert sync_html.count(">Sync from QRZ</button>") == 1
+    assert 'action="/admin/log/sync"' in sync_html
+    assert 'href="/admin/log?section=sync"' not in sync_html
 
     missing = client.get("/admin/log?section=missing")
     missing_html = missing.get_data(as_text=True)
@@ -175,6 +178,9 @@ def test_logbook_sections_and_not_matched_link(client, monkeypatch):
     assert "<h2>Import ADIF</h2>" in import_html
     assert 'name="adif_file"' in import_html
     assert ">Find missing QSOs</button>" not in import_html
+    # Sync stays one press away from the other panels too.
+    assert import_html.count(">Sync from QRZ</button>") == 1
+    assert missing_html.count(">Sync from QRZ</button>") == 1
 
     bogus = client.get("/admin/log?section=nope")
     assert 'id="log-panel-sync"' in bogus.get_data(as_text=True)

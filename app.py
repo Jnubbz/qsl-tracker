@@ -1481,8 +1481,8 @@ def admin_log_sync():
     redirect_to = _safe_next(url_for("admin_log"))
     if not QRZ_LOGBOOK_API_KEY:
         flash(
-            "QRZ sync isn't set up yet: add QRZ_LOGBOOK_API_KEY in Render's "
-            "Environment settings (QRZ.com -> Logbook -> Settings -> API key).",
+            "QRZ sync isn't set up yet: add QRZ_LOGBOOK_API_KEY to the "
+            "server's .env file (QRZ.com -> Logbook -> Settings -> API key).",
             "error",
         )
         return redirect(redirect_to)

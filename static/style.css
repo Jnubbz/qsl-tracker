@@ -288,6 +288,17 @@ main .section-tabs a {
 
 main .section-tabs a:hover { color: var(--ink); }
 
+/* Logbook: the Sync action button and the two panel links share one row */
+.log-actions { align-items: center; }
+.log-actions .section-tabs { margin: 0; }
+.log-actions button {
+  padding: 0.45rem 0.85rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  border: 1px solid var(--accent);
+  line-height: normal;
+}
+
 main .section-tabs a.active,
 main .section-tabs a[aria-current="page"] {
   background: var(--accent);
