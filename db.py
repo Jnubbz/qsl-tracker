@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS qsl_requests (
     note TEXT,
     contact_email TEXT,
     address TEXT,
-    created_at REAL NOT NULL
+    created_at REAL NOT NULL,
+    answered_at REAL
 );
 CREATE INDEX IF NOT EXISTS idx_qsl_requests_session ON qsl_requests(session_id);
 """
@@ -77,6 +78,8 @@ def init_db() -> None:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(qsl_requests)")}
         if "address" not in cols:
             conn.execute("ALTER TABLE qsl_requests ADD COLUMN address TEXT")
+        if "answered_at" not in cols:
+            conn.execute("ALTER TABLE qsl_requests ADD COLUMN answered_at REAL")
 
 
 def purge_expired() -> None:
@@ -141,12 +144,23 @@ def list_qsl_requests() -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute(
             """
-            SELECT id, callsign, note, contact_email, address, created_at
+            SELECT id, callsign, note, contact_email, address, created_at, answered_at
             FROM qsl_requests
             ORDER BY created_at DESC, id DESC
             """
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def set_qsl_request_answered(request_id: int, answered: bool) -> bool:
+    """Tick or untick a card request as answered. Returns False if no
+    request has that id."""
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE qsl_requests SET answered_at = ? WHERE id = ?",
+            (time.time() if answered else None, request_id),
+        )
+        return cur.rowcount > 0
 
 
 def count_recent_qsl_requests(session_id: str, window_seconds: int) -> int:

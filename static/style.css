@@ -739,3 +739,31 @@ form[hidden] { display: none; }
 .qso-show-form label { margin: 0; }
 .qso-show-form select { width: auto; margin: 0; }
 .card-nudge-form input[type="number"] { max-width: 8rem; }
+
+/* Card requests: "Answered" checkbox. Answered entries dim so open ones stand out. */
+.request-summary { margin: 0.5rem 0 0; }
+
+.request-answered-form {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.25rem 0 0.5rem;
+}
+
+.request-answered {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.request-answered input[type=checkbox] {
+  width: 1.15rem;
+  height: 1.15rem;
+  margin: 0;
+  cursor: pointer;
+}
+
+.request-entry.is-answered { opacity: 0.55; }
+.request-entry.is-answered h2 { text-decoration: line-through; }

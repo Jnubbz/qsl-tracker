@@ -139,3 +139,45 @@ def test_existing_database_gains_address_column(tmp_path, monkeypatch):
     assert rows["K1JT"]["address"] == "1 Main St\nSpringfield"
     assert rows["W1AW"]["address"] in (None, "")
     assert rows["W1AW"]["contact_email"] == "old@example.com"
+
+
+def test_answered_checkbox_ticks_and_unticks(client):
+    client.post("/request-qsl", data={"callsign": "W1AW"})
+    client.post("/request-qsl", data={"callsign": "K1JT"})
+    rows = {r["callsign"]: r for r in db.list_qsl_requests()}
+    assert all(r["answered_at"] is None for r in rows.values())
+    w1aw = rows["W1AW"]["id"]
+
+    # Admin only, and CSRF-protected like every other admin POST.
+    denied = client.post(f"/admin/requests/{w1aw}/answered", data={"answered": "1"})
+    assert denied.status_code in (302, 400, 403)
+    assert {r["callsign"]: r for r in db.list_qsl_requests()}["W1AW"]["answered_at"] is None
+
+    sign_in_admin(client)
+    html = client.get("/admin/requests").get_data(as_text=True)
+    assert html.count('name="answered"') == 2
+    assert "<strong>2</strong> not answered yet" in html
+
+    resp = client.post(
+        f"/admin/requests/{w1aw}/answered", data={"answered": "1", "csrf_token": "tok"}
+    )
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith(f"/admin/requests#req-{w1aw}")
+    rows = {r["callsign"]: r for r in db.list_qsl_requests()}
+    assert rows["W1AW"]["answered_at"] is not None
+    assert rows["K1JT"]["answered_at"] is None
+
+    html = client.get("/admin/requests").get_data(as_text=True)
+    assert "<strong>1</strong> not answered yet" in html
+    assert "is-answered" in html
+    assert html.count("checked") == 1
+
+    # Unticking sends no "answered" field at all.
+    client.post(f"/admin/requests/{w1aw}/answered", data={"csrf_token": "tok"})
+    assert {r["callsign"]: r for r in db.list_qsl_requests()}["W1AW"]["answered_at"] is None
+
+
+def test_answered_on_missing_request_is_harmless(client):
+    sign_in_admin(client)
+    resp = client.post("/admin/requests/999/answered", data={"answered": "1", "csrf_token": "tok"})
+    assert resp.status_code == 302

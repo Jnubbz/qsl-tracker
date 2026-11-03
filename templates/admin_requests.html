@@ -7,15 +7,35 @@
       Submitted from Request a Card. A mailing address is whatever the
       operator typed. Email is only so you can reach them.
     </p>
+    {% if requests %}
+      <p class="request-summary">
+        {% if open_count %}<strong>{{ open_count }}</strong> not answered yet{% else %}All answered{% endif %}
+        <span class="muted">&middot; {{ requests | length }} total</span>
+      </p>
+    {% endif %}
 
     {% if requests %}
       <ul class="request-list">
         {% for req in requests %}
-          <li class="request-entry">
+          <li class="request-entry{% if req.answered_at %} is-answered{% endif %}" id="req-{{ req.id }}">
             <div class="dashboard-top">
               <h2>{{ req.callsign }}</h2>
               <span class="muted">{{ req.created_at | utc_time }}</span>
             </div>
+            <form class="request-answered-form" method="post"
+                  action="{{ url_for('admin_request_answered', request_id=req.id) }}">
+              {% include "_csrf.html" %}
+              <label class="request-answered">
+                <input type="checkbox" name="answered" value="1"
+                       {% if req.answered_at %}checked{% endif %}
+                       onchange="this.form.submit()">
+                Answered
+              </label>
+              {% if req.answered_at %}
+                <span class="muted">{{ req.answered_at | utc_time }}</span>
+              {% endif %}
+              <noscript><button type="submit">Save</button></noscript>
+            </form>
             {% if req.address %}
               <p class="request-address">{{ req.address }}</p>
             {% else %}

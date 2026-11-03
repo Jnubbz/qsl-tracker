@@ -722,7 +722,20 @@ def admin_requests():
     """Card requests saved from /request-qsl, including an optional
     mailing address. The contact email is shown so Josh can reach the
     operator; it is not a reply-to address."""
-    return render_template("admin_requests.html", requests=db.list_qsl_requests())
+    reqs = db.list_qsl_requests()
+    open_count = sum(1 for r in reqs if not r["answered_at"])
+    return render_template("admin_requests.html", requests=reqs, open_count=open_count)
+
+
+@app.route("/admin/requests/<int:request_id>/answered", methods=["POST"])
+@admin_required
+def admin_request_answered(request_id):
+    """Tick/untick "Answered" on one card request. The checkbox sends
+    answered=1 when ticked and nothing when unticked."""
+    answered = request.form.get("answered") == "1"
+    if not db.set_qsl_request_answered(request_id, answered):
+        flash("That card request no longer exists.", "error")
+    return redirect(url_for("admin_requests") + f"#req-{request_id}")
 
 
 # ---------------------------------------------------------------------
