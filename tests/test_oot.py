@@ -30,14 +30,14 @@ def test_wizard_requires_admin(client):
     assert oot_songs.file_for("song-of-time") is None
 
 
-def test_wizard_starts_on_first_song_and_lists_all(client):
+def test_wizard_starts_on_first_song(client):
     sign_in_admin(client)
     html = client.get("/admin/oot").get_data(as_text=True)
     assert "Step 1 of 12" in html
     assert "Zelda&#39;s Lullaby" in html
-    for _slug, name, _g in oot_songs.SONGS:
-        assert name.replace("'", "&#39;") in html
     assert "0 of 12 songs have a recording" in html
+    assert "All songs" not in html
+    assert "/static/oot/midi-player.js" in html
 
 
 def test_upload_saves_and_advances(client, audio_dir):
@@ -144,3 +144,41 @@ def test_file_supports_range_requests(client):
 @pytest.mark.parametrize("name", ["song-of-time.mp3", "nope.mp3", "sarias-song.txt", ".sarias-song.upload", "..", "manifest"])
 def test_public_file_404s(client, name):
     assert client.get("/oot-audio/" + name).status_code == 404
+
+
+# A real (tiny) Standard MIDI File: format 0, one track, two notes.
+MIDI = bytes.fromhex(
+    "4d546864000000060000000101e0"
+    "4d54726b0000001b"
+    "00ff510307a120"
+    "00904864" "8360804840"
+    "00904c64" "8360804c40"
+    "00ff2f00"
+)
+
+
+def test_midi_upload_is_accepted_and_served(client, audio_dir):
+    sign_in_admin(client)
+    upload(client, "song-of-time", data=MIDI, name="sot.MID")
+    assert (audio_dir / "song-of-time.mid").read_bytes() == MIDI
+    entry = {s["slug"]: s for s in client.get("/oot-audio/manifest.json").get_json()["songs"]}["song-of-time"]
+    assert entry["file"].startswith("song-of-time.mid?v=")
+    resp = client.get("/oot-audio/song-of-time.mid")
+    assert resp.status_code == 200
+    assert resp.mimetype == "audio/midi"
+    assert resp.data == MIDI
+
+
+def test_wizard_shows_midi_play_button_instead_of_audio_tag(client):
+    sign_in_admin(client)
+    upload(client, "song-of-time", data=MIDI, name="sot.midi", stay="1")
+    html = client.get("/admin/oot?step=4").get_data(as_text=True)
+    assert 'class="secondary oot-midi-play"' in html
+    assert "song-of-time.midi?v=" in html
+    assert '<audio controls preload="none"' not in html
+
+
+def test_midi_player_script_is_served(client):
+    resp = client.get("/static/oot/midi-player.js")
+    assert resp.status_code == 200
+    assert b"window.MidiPlayer" in resp.data

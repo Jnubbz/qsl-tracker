@@ -465,4 +465,6 @@ data volume in `oot/` (`/data/oot` on Unraid; `OOT_AUDIO_DIR` overrides),
 as `<slug>.<ext>`, one per song. Public, cookie-free routes:
 `/oot-audio/manifest.json` (which songs have a file) and
 `/oot-audio/<slug>.<ext>`. kn0ble.com's nginx proxies `/oot/audio/` to
-them. Song list: `oot_songs.SONGS`.
+them. Song list: `oot_songs.SONGS`. `.mid`/`.midi` files are played by
+`static/oot/midi-player.js` (Web Audio synth; same file as kn0ble.com
+`oot/midi-player.js` -- keep the two identical).

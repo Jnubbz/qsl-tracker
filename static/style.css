@@ -785,8 +785,8 @@ form[hidden] { display: none; }
 button.secondary { background: transparent; color: var(--ink); border: 1px solid var(--border); }
 .oot-nav { display: flex; justify-content: space-between; margin-top: 1.25rem; }
 .oot-remove { margin-top: 1rem; }
-.oot-list { margin: 0; padding: 0; list-style: none; }
-.oot-list li { padding: 0.3rem 0; display: flex; justify-content: space-between; gap: 1rem; }
-.oot-list li.is-current a { font-weight: 600; }
-.oot-ok { color: var(--accent); }
+
+
+
+
 .oot-done { border-color: var(--accent); }

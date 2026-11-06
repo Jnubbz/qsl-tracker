@@ -7,7 +7,7 @@
       <p>{{ have }} of {{ songs | length }} songs have a recording.
         They're live on <a href="https://kn0ble.com/oot" target="_blank" rel="noopener">kn0ble.com/oot</a>.</p>
       {% if have < songs | length %}
-        <p class="muted">Songs without one show "no file" there. Pick any of them below to add it.</p>
+        <p class="muted">Songs without one show "no file" there. Use Back to add any you skipped.</p>
       {% endif %}
     </section>
   {% endif %}
@@ -26,21 +26,27 @@
     <h2 class="oot-song">{{ current.name }}</h2>
 
     {% if current.file %}
+      {% set cur_url = url_for('oot_audio_file', name=current.file) ~ '?v=' ~ current.version %}
       <div class="oot-current">
-        <p class="muted">Current recording ({{ (current.size / 1024) | round | int }} KB):</p>
-        <audio controls preload="none" src="{{ url_for('oot_audio_file', name=current.file) }}?v={{ current.version }}"></audio>
+        <p class="muted">Current file: {{ current.file }} ({{ [1, (current.size / 1024) | round | int] | max }} KB)</p>
+        {% if current.file.endswith('.mid') or current.file.endswith('.midi') %}
+          <button type="button" class="secondary oot-midi-play" data-src="{{ cur_url }}">&#9654; Play</button>
+        {% else %}
+          <audio controls preload="none" src="{{ cur_url }}"></audio>
+        {% endif %}
       </div>
     {% else %}
-      <p class="muted">No recording yet.</p>
+      <p class="muted">No file yet.</p>
     {% endif %}
 
     <form method="post" enctype="multipart/form-data"
           action="{{ url_for('admin_oot_upload', slug=current.slug) }}" class="oot-upload">
       {% include "_csrf.html" %}
-      <label for="oot-file">{% if current.file %}Replace it with a new file{% else %}Choose an audio file{% endif %}</label>
+      <label for="oot-file">{% if current.file %}Replace it with a new file{% else %}Choose an audio or MIDI file{% endif %}</label>
       <input id="oot-file" type="file" name="audio" accept="{{ accept }}" required>
       <audio id="oot-pick-preview" controls hidden></audio>
-      <p class="muted oot-hint">mp3 or m4a play everywhere. Up to {{ max_mb }} MB.</p>
+      <button type="button" id="oot-pick-midi" class="secondary" hidden>&#9654; Play the file you picked</button>
+      <p class="muted oot-hint">mp3, m4a or MIDI (.mid). Up to {{ max_mb }} MB.</p>
       <div class="oot-actions">
         <button type="submit">{% if step + 1 < songs | length %}Save &amp; next{% else %}Save &amp; finish{% endif %}</button>
         <button type="submit" name="stay" value="1" class="secondary">Save, stay here</button>
@@ -60,38 +66,66 @@
 
     {% if current.file %}
       <form method="post" action="{{ url_for('admin_oot_delete', slug=current.slug) }}" class="oot-remove"
-            onsubmit="return confirm('Remove the recording for {{ current.name }}?')">
+            onsubmit="return confirm('Remove the file for {{ current.name }}?')">
         {% include "_csrf.html" %}
-        <button type="submit" class="link-button danger">Remove this recording</button>
+        <button type="submit" class="link-button danger">Remove this file</button>
       </form>
     {% endif %}
   </section>
 
-  <section class="card">
-    <h2>All songs</h2>
-    <ol class="oot-list">
-      {% for s in songs %}
-        <li class="{% if loop.index0 == step %}is-current{% endif %}">
-          <a href="{{ url_for('admin_oot', step=loop.index0) }}">{{ s.name }}</a>
-          {% if s.file %}<span class="oot-ok">&#10003; added</span>{% else %}<span class="muted">not yet</span>{% endif %}
-        </li>
-      {% endfor %}
-    </ol>
-  </section>
-
+  <script src="{{ url_for('static', filename='oot/midi-player.js') }}"></script>
   <script>
-    // Let Josh hear the file he picked before uploading it.
+    // Hear a file before uploading it, and play stored MIDI files
+    // (browsers can't play .mid in <audio>; midi-player.js synthesizes it).
     (function () {
+      var handle = null, active = null;
+      function stopMidi() {
+        if (handle) { handle.stop(); handle = null; }
+        if (active) { active.innerHTML = active.dataset.label; active = null; }
+      }
+      function toggle(btn, getSong) {
+        if (active === btn) { stopMidi(); return; }
+        stopMidi();
+        MidiPlayer.unlock();
+        btn.dataset.label = btn.dataset.label || btn.innerHTML;
+        active = btn;
+        btn.innerHTML = "&#9632; Stop";
+        getSong().then(function (song) {
+          if (active !== btn) return;
+          handle = MidiPlayer.play(song, function () { if (active === btn) { handle = null; stopMidi(); } });
+        }).catch(function () {
+          stopMidi();
+          alert("Couldn't read that MIDI file.");
+        });
+      }
+      document.querySelectorAll(".oot-midi-play").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          toggle(btn, function () { return MidiPlayer.load(btn.dataset.src); });
+        });
+      });
+
       var input = document.getElementById("oot-file");
       var preview = document.getElementById("oot-pick-preview");
-      var url = null;
+      var midiBtn = document.getElementById("oot-pick-midi");
+      var url = null, picked = null;
       input.addEventListener("change", function () {
+        stopMidi();
         if (url) { URL.revokeObjectURL(url); url = null; }
-        var f = input.files && input.files[0];
-        if (!f) { preview.hidden = true; return; }
-        url = URL.createObjectURL(f);
-        preview.src = url;
-        preview.hidden = false;
+        preview.hidden = true;
+        preview.removeAttribute("src");
+        midiBtn.hidden = true;
+        picked = input.files && input.files[0];
+        if (!picked) return;
+        if (MidiPlayer.isMidi(picked.name)) {
+          midiBtn.hidden = false;
+        } else {
+          url = URL.createObjectURL(picked);
+          preview.src = url;
+          preview.hidden = false;
+        }
+      });
+      midiBtn.addEventListener("click", function () {
+        toggle(midiBtn, function () { return picked.arrayBuffer().then(MidiPlayer.parse); });
       });
     })();
   </script>

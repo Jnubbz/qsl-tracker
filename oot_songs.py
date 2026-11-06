@@ -48,6 +48,10 @@ AUDIO_TYPES = {
     "opus": "audio/ogg",
     "webm": "audio/webm",
     "flac": "audio/flac",
+    # MIDI is notes, not sound: the /oot page and the wizard play it
+    # with midi-player.js (Web Audio), not <audio>.
+    "mid": "audio/midi",
+    "midi": "audio/midi",
 }
 
 _FILE_RE = re.compile(r"^([a-z0-9-]+)\.([a-z0-9]+)$")
