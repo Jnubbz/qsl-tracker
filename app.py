@@ -19,10 +19,11 @@ from datetime import date, datetime, timedelta
 from functools import wraps
 from urllib.parse import urlparse
 
-from flask import Flask, Response, abort, flash, redirect, render_template, request, session, url_for
+from flask import Flask, Response, abort, flash, jsonify, redirect, render_template, request, send_file, session, url_for
 
 import db
 import labels
+import oot_songs
 import photomap_store
 import qso_map
 from adif import distinct_callsigns, parse_adif
@@ -188,12 +189,17 @@ def utc_time(ts) -> str:
         return ""
 
 
+SESSIONLESS_ENDPOINTS = frozenset({"healthz", "oot_audio_manifest", "oot_audio_file"})
+
+
 @app.before_request
 def ensure_session():
     # /healthz is the container probe. Skip the session cookie and the
     # SQLite purge so a liveness check does not write anything. The
-    # route itself never calls S3 or QRZ.
-    if request.endpoint == "healthz":
+    # route itself never calls S3 or QRZ. The /oot-audio/ files are
+    # public and proxied through kn0ble.com, so they skip it too: no
+    # cookie on someone else's page, no DB write per audio request.
+    if request.endpoint in SESSIONLESS_ENDPOINTS:
         return None
     if "session_id" not in session:
         session["session_id"] = secrets.token_urlsafe(24)
@@ -252,6 +258,7 @@ def request_too_large(_exc):
         "admin_photomap_edit": "admin_photomap_manage",
         "raw_address_adif_batch": "raw_address",
         "request_qsl": "request_qsl",
+        "admin_oot_upload": "admin_oot",
     }
     return redirect(url_for(targets.get(request.endpoint, "index")))
 
@@ -736,6 +743,103 @@ def admin_request_answered(request_id):
     if not db.set_qsl_request_answered(request_id, answered):
         flash("That card request no longer exists.", "error")
     return redirect(url_for("admin_requests") + f"#req-{request_id}")
+
+
+# ---------------------------------------------------------------------
+# Song buttons for kn0ble.com/oot. Josh adds one recording per song with
+# the /admin/oot wizard; kn0ble.com's nginx proxies /oot/audio/ to the
+# public /oot-audio/ routes below. Files live in oot_songs.audio_dir().
+# ---------------------------------------------------------------------
+
+@app.route("/admin/oot")
+@admin_required
+def admin_oot():
+    """One song per step. With no ?step, open on the first song that has
+    no recording yet (or the first song when all are done)."""
+    songs = oot_songs.status()
+    done = request.args.get("done") == "1"
+    step = request.args.get("step", type=int)
+    if step is None:
+        step = next((i for i, s in enumerate(songs) if not s["file"]), 0)
+    step = max(0, min(step, len(songs) - 1))
+    have = sum(1 for s in songs if s["file"])
+    return render_template(
+        "admin_oot.html",
+        songs=songs,
+        step=step,
+        current=songs[step],
+        have=have,
+        done=done,
+        accept=",".join(["audio/*"] + ["." + e for e in oot_songs.AUDIO_TYPES]),
+        max_mb=MAX_UPLOAD_BYTES // (1024 * 1024),
+    )
+
+
+def _oot_step_url(index: int) -> str:
+    if index >= len(oot_songs.SONGS):
+        return url_for("admin_oot", step=len(oot_songs.SONGS) - 1, done=1)
+    return url_for("admin_oot", step=index)
+
+
+@app.route("/admin/oot/<slug>", methods=["POST"])
+@admin_required
+def admin_oot_upload(slug):
+    """Save the uploaded recording for one song, then go to the next."""
+    if slug not in oot_songs.NAMES:
+        abort(404)
+    index = oot_songs.SLUGS.index(slug)
+    upload = request.files.get("audio")
+    if upload is None or not upload.filename:
+        flash("Pick an audio file first.", "error")
+        return redirect(_oot_step_url(index))
+    ext = oot_songs.extension_of(upload.filename)
+    if ext is None:
+        allowed = ", ".join(sorted(oot_songs.AUDIO_TYPES))
+        flash(f"That isn't an audio file this page takes. Use one of: {allowed}.", "error")
+        return redirect(_oot_step_url(index))
+    try:
+        oot_songs.save(slug, upload, ext)
+    except ValueError as exc:
+        flash(f"Couldn't save that file: {exc}.", "error")
+        return redirect(_oot_step_url(index))
+    flash(f"Saved {oot_songs.NAMES[slug]}.", "success")
+    if request.form.get("stay") == "1":
+        return redirect(_oot_step_url(index))
+    return redirect(_oot_step_url(index + 1))
+
+
+@app.route("/admin/oot/<slug>/delete", methods=["POST"])
+@admin_required
+def admin_oot_delete(slug):
+    if slug not in oot_songs.NAMES:
+        abort(404)
+    if oot_songs.delete(slug):
+        flash(f"Removed {oot_songs.NAMES[slug]}.", "success")
+    return redirect(_oot_step_url(oot_songs.SLUGS.index(slug)))
+
+
+@app.route("/oot-audio/manifest.json")
+def oot_audio_manifest():
+    """Public: which songs have a recording. Never cached, so a new
+    upload shows up on the next page load."""
+    resp = jsonify(oot_songs.manifest())
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.route("/oot-audio/<name>")
+def oot_audio_file(name):
+    """Public: one recording. File names come from the manifest, which
+    adds ?v=<mtime>, so a replaced file gets a new URL and the cache can
+    be long. send_file handles Range requests (Safari needs them)."""
+    parsed = oot_songs.parse_served_name(name)
+    if parsed is None:
+        abort(404)
+    slug, ext = parsed
+    path = oot_songs.audio_dir() / f"{slug}.{ext}"
+    if not path.is_file():
+        abort(404)
+    return send_file(path, mimetype=oot_songs.AUDIO_TYPES[ext], conditional=True, max_age=86400)
 
 
 # ---------------------------------------------------------------------

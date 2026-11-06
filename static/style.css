@@ -767,3 +767,26 @@ form[hidden] { display: none; }
 
 .request-entry.is-answered { opacity: 0.55; }
 .request-entry.is-answered h2 { text-decoration: line-through; }
+
+/* Song buttons setup (/admin/oot) */
+.oot-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
+.oot-progress { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; margin-top: 0.5rem; }
+.oot-progress span { display: block; height: 100%; background: var(--accent); }
+.oot-progress-label { margin: 0.35rem 0 1.25rem; font-size: 0.9rem; }
+.oot-step { margin: 0; font-size: 0.9rem; }
+.card h2.oot-song { font-size: 1.6rem; margin: 0.15rem 0 0.75rem; }
+.oot-current { margin-bottom: 1rem; }
+.oot-current p { margin: 0 0 0.35rem; }
+.oot-wizard audio { width: 100%; max-width: 420px; }
+.oot-upload { margin-top: 0.5rem; }
+.oot-hint { margin: 0; font-size: 0.85rem; }
+.oot-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-top: 0.25rem; }
+.oot-actions button { align-self: auto; }
+button.secondary { background: transparent; color: var(--ink); border: 1px solid var(--border); }
+.oot-nav { display: flex; justify-content: space-between; margin-top: 1.25rem; }
+.oot-remove { margin-top: 1rem; }
+.oot-list { margin: 0; padding: 0; list-style: none; }
+.oot-list li { padding: 0.3rem 0; display: flex; justify-content: space-between; gap: 1rem; }
+.oot-list li.is-current a { font-weight: 600; }
+.oot-ok { color: var(--accent); }
+.oot-done { border-color: var(--accent); }

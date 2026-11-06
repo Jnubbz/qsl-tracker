@@ -456,3 +456,13 @@ to export them yourself.
 ## License
 
 MIT -- see [LICENSE](LICENSE).
+
+## Song buttons for kn0ble.com/oot
+
+`/admin/oot` is a step-by-step wizard: one song per step, pick an audio
+file (preview plays before upload), Save & next. Files are stored on the
+data volume in `oot/` (`/data/oot` on Unraid; `OOT_AUDIO_DIR` overrides),
+as `<slug>.<ext>`, one per song. Public, cookie-free routes:
+`/oot-audio/manifest.json` (which songs have a file) and
+`/oot-audio/<slug>.<ext>`. kn0ble.com's nginx proxies `/oot/audio/` to
+them. Song list: `oot_songs.SONGS`.
