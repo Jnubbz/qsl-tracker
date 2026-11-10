@@ -1,10 +1,11 @@
 {% extends "base.html" %}
-{% import "macros.html" as ui %}
 {% block title %}QSL Cards -- QSL Tracker{% endblock %}
 {% block content %}
   <section class="card">
-    <h1>QSL Cards</h1>
-    {{ ui.cards_tabs('manage') }}
+    <div class="dashboard-top">
+      <h1>QSL Cards</h1>
+      <a class="button-link" href="{{ url_for('admin_photomap_upload') }}">Upload a card</a>
+    </div>
     <p class="muted">
       Every card that's been uploaded. Anything flagged below still shows up on
       the QSL Photo Map -- it just displays as incomplete (no photo, or no QSO

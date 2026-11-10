@@ -159,8 +159,9 @@ QRZ_SYNC_RECENT_DAYS = 7
 QSO_TABLE_SHOW_OPTIONS = (25, 50, 100, 200)
 QSO_TABLE_ROW_CAP = 25
 
-# Logbook page sections. The route stays /admin/log; `section` only
-# chooses which task (sync, find missing, import) is on screen.
+# Logbook shows sync, find-missing, and import together. `section` names
+# which task a redirect or the old import URL is about (that card is
+# marked); it does not hide the others. The route stays /admin/log.
 LOG_SECTIONS = ("sync", "missing", "import")
 
 
