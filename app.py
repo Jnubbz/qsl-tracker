@@ -190,7 +190,7 @@ def utc_time(ts) -> str:
         return ""
 
 
-SESSIONLESS_ENDPOINTS = frozenset({"healthz", "oot_audio_manifest", "oot_audio_file", "tv_config"})
+SESSIONLESS_ENDPOINTS = frozenset({"healthz", "oot_audio_manifest", "oot_audio_file", "tv_config", "tv_config_internal"})
 
 
 @app.before_request
@@ -948,6 +948,20 @@ def admin_tv_clear():
     tv_channels.clear()
     flash("All channels removed.", "success")
     return redirect(url_for("admin_tv"))
+
+
+@app.route("/tv-config-internal.json")
+def tv_config_internal():
+    """The active channel WITH its URL, for the kn0ble-tv relay container.
+    Needs X-TV-Token = TV_PROXY_TOKEN (set the same value on both
+    containers). Without the env var set, the route doesn't exist."""
+    expected = os.environ.get("TV_PROXY_TOKEN", "")
+    sent = request.headers.get("X-TV-Token", "")
+    if not expected or not secrets.compare_digest(expected.encode(), sent.encode()):
+        abort(404)
+    resp = jsonify(tv_channels.internal_config())
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @app.route("/tv-config.json")

@@ -66,7 +66,7 @@ def test_add_and_put_on_tv(client):
     post(client, "/admin/tv/add", url="https://a.example/one.m3u8", name="One")
     post(client, "/admin/tv/add", url="https://a.example/two.m3u8", name="Two", play="1")
     cfg = client.get("/tv-config.json").get_json()["channel"]
-    assert cfg["name"] == "Two" and cfg["url"] == "https://a.example/two.m3u8"
+    assert cfg["name"] == "Two" and "url" not in cfg
     html = client.get("/admin/tv").get_data(as_text=True)
     assert "On TV now: <strong>Two</strong>" in html
     assert "Channels <span class=\"muted\">(2)</span>" in html
@@ -136,3 +136,25 @@ def test_names_are_escaped(client):
     upload(client, '#EXTM3U\n#EXTINF:-1,<script>x</script>\nhttps://s.example/s.m3u8\n')
     html = client.get("/admin/tv").get_data(as_text=True)
     assert "<script>x</script>" not in html
+
+
+def test_public_config_hides_url(client):
+    sign_in_admin(client)
+    post(client, "/admin/tv/add", url="http://h.example:8080/USER/PASS/123", name="X")
+    body = client.get("/tv-config.json").get_data(as_text=True)
+    assert "PASS" not in body and '"name":"X"' in body.replace(" ", "")
+
+
+def test_internal_config_needs_token(client, monkeypatch):
+    sign_in_admin(client)
+    post(client, "/admin/tv/add", url="http://h.example:8080/USER/PASS/123", name="X")
+    # No env var: route is off.
+    monkeypatch.delenv("TV_PROXY_TOKEN", raising=False)
+    assert client.get("/tv-config-internal.json", headers={"X-TV-Token": ""}).status_code == 404
+    monkeypatch.setenv("TV_PROXY_TOKEN", "s3cret")
+    assert client.get("/tv-config-internal.json").status_code == 404
+    assert client.get("/tv-config-internal.json", headers={"X-TV-Token": "wrong"}).status_code == 404
+    resp = client.get("/tv-config-internal.json", headers={"X-TV-Token": "s3cret"})
+    assert resp.get_json()["channel"]["url"] == "http://h.example:8080/USER/PASS/123"
+    assert resp.headers["Cache-Control"] == "no-store"
+    assert "Set-Cookie" not in resp.headers

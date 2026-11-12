@@ -233,7 +233,17 @@ def active_channel() -> dict | None:
 
 
 def public_config() -> dict:
-    """What kn0ble.com/tv needs: the one channel on TV, or null."""
+    """What kn0ble.com/tv needs: the channel on TV (name only), or null.
+    The URL is left out: it can hold IPTV login details, and the page
+    plays through the kn0ble-tv relay, not the source."""
+    ch = active_channel()
+    if not ch:
+        return {"channel": None}
+    return {"channel": {"id": ch["id"], "name": ch["name"]}}
+
+
+def internal_config() -> dict:
+    """For the kn0ble-tv relay only (token-checked): includes the URL."""
     ch = active_channel()
     if not ch:
         return {"channel": None}
