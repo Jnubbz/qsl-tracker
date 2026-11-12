@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}TV setup -- QSL Tracker{% endblock %}
+{% block content %}
+  <section class="card tv-now">
+    <div class="tv-head">
+      <h1>TV setup</h1>
+      <a href="https://kn0ble.com/tv" target="_blank" rel="noopener">Open kn0ble.com/tv</a>
+    </div>
+    {% if active %}
+      <p class="tv-on">On TV now: <strong>{{ active.name }}</strong></p>
+      <p class="muted tv-url">{{ active.url }}</p>
+      {% if active.url.startswith('http://') %}
+        <p class="tv-warn">This is an http:// URL. kn0ble.com is https, so browsers will refuse to play it there.</p>
+      {% endif %}
+    {% else %}
+      <p class="muted">Nothing is on TV. Add a stream below{% if channels %} or pick one from the list{% endif %}.</p>
+    {% endif %}
+
+    <div class="tv-preview">
+      <p class="muted tv-preview-label" id="tv-preview-label">Preview{% if active %}: {{ active.name }}{% endif %}</p>
+      <video id="tv-preview" controls playsinline muted preload="none"></video>
+      <p class="muted tv-preview-status" id="tv-preview-status" role="status" aria-live="polite"></p>
+      {% if active %}
+        <button type="button" class="secondary tv-preview-btn" data-url="{{ active.url }}" data-name="{{ active.name }}">&#9654; Preview</button>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Add a stream</h2>
+    <form method="post" action="{{ url_for('admin_tv_add') }}" class="tv-form">
+      {% include "_csrf.html" %}
+      <label for="tv-url">Stream URL (.m3u8)</label>
+      <input id="tv-url" type="url" name="url" required placeholder="https://.../playlist.m3u8" autocomplete="off">
+      <label for="tv-name">Name <span class="muted">(optional)</span></label>
+      <input id="tv-name" type="text" name="name" maxlength="120" autocomplete="off">
+      <div class="tv-actions">
+        <button type="submit" name="play" value="1">Add &amp; put on TV</button>
+        <button type="submit" class="secondary">Just add</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Upload a playlist</h2>
+    <form method="post" enctype="multipart/form-data" action="{{ url_for('admin_tv_upload') }}" class="tv-form">
+      {% include "_csrf.html" %}
+      <label for="tv-file">IPTV channel list (.m3u, .m3u8, or similar)</label>
+      <input id="tv-file" type="file" name="playlist" required>
+      <label class="tv-check"><input type="checkbox" name="replace" value="1"> Replace the current list</label>
+      <p class="muted tv-hint">Every channel in the file is added. Up to {{ max_mb }} MB.</p>
+      <div class="tv-actions"><button type="submit">Upload</button></div>
+    </form>
+  </section>
+
+  <section class="card">
+    <div class="tv-head">
+      <h2>Channels <span class="muted">({{ channels | length }})</span></h2>
+      {% if channels %}
+        <form method="post" action="{{ url_for('admin_tv_clear') }}" onsubmit="return confirm('Remove all {{ channels | length }} channels?')">
+          {% include "_csrf.html" %}
+          <button type="submit" class="link-button danger">Remove all</button>
+        </form>
+      {% endif %}
+    </div>
+    {% if channels %}
+      {% if channels | length > 8 %}
+        <input type="search" id="tv-filter" class="tv-filter" placeholder="Filter channels" aria-label="Filter channels">
+      {% endif %}
+      {# One shared form; each button posts to its own action. Keeps a big list light. #}
+      <form method="post" id="tv-act">
+        {% include "_csrf.html" %}
+        <input type="hidden" name="name" id="tv-rename-value">
+      </form>
+      <ul class="tv-list" id="tv-list">
+        {% for c in channels %}
+          <li class="tv-row{% if active and c.id == active.id %} on{% endif %}" data-search="{{ (c.name ~ ' ' ~ c.group) | lower }}">
+            <div class="tv-row-main">
+              <span class="tv-row-name">{{ c.name }}</span>
+              {% if c.group %}<span class="muted tv-row-group">{{ c.group }}</span>{% endif %}
+            </div>
+            <div class="tv-row-actions">
+              <button type="button" class="link-button tv-preview-btn" data-url="{{ c.url }}" data-name="{{ c.name }}">Preview</button>
+              {% if active and c.id == active.id %}
+                <span class="tv-badge">On TV</span>
+              {% else %}
+                <button type="submit" form="tv-act" class="link-button" formaction="{{ url_for('admin_tv_play', channel_id=c.id) }}">Put on TV</button>
+              {% endif %}
+              <button type="submit" form="tv-act" class="link-button tv-rename" data-name="{{ c.name }}" formaction="{{ url_for('admin_tv_rename', channel_id=c.id) }}">Rename</button>
+              <button type="submit" form="tv-act" class="link-button danger tv-remove" data-name="{{ c.name }}" formaction="{{ url_for('admin_tv_delete', channel_id=c.id) }}">Remove</button>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+      <p class="muted" id="tv-filter-empty" hidden>No channels match.</p>
+    {% else %}
+      <p class="muted">No channels yet.</p>
+    {% endif %}
+  </section>
+
+  <script src="{{ url_for('static', filename='tv/hls.min.js') }}"></script>
+  <script>
+    (function () {
+      var video = document.getElementById("tv-preview");
+      var label = document.getElementById("tv-preview-label");
+      var statusEl = document.getElementById("tv-preview-status");
+      var hls = null;
+
+      function stop() {
+        if (hls) { hls.destroy(); hls = null; }
+        video.removeAttribute("src"); video.load();
+      }
+      function preview(url, name) {
+        stop();
+        label.textContent = "Preview: " + name;
+        statusEl.textContent = "Connecting…";
+        video.scrollIntoView({ behavior: "smooth", block: "center" });
+        if (window.Hls && Hls.isSupported()) {
+          hls = new Hls();
+          hls.on(Hls.Events.MANIFEST_PARSED, function () { video.play().catch(function () {}); });
+          hls.on(Hls.Events.ERROR, function (_e, d) {
+            if (!d.fatal) return;
+            statusEl.textContent = d.type === Hls.ErrorTypes.NETWORK_ERROR
+              ? "Can't load it here. It may be offline, or its server blocks other sites (CORS)."
+              : "It won't play (" + d.details + ").";
+            stop();
+          });
+          hls.loadSource(url); hls.attachMedia(video);
+        } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+          video.src = url; video.play().catch(function () {});
+        } else {
+          statusEl.textContent = "This browser can't play HLS.";
+        }
+      }
+      video.addEventListener("playing", function () { statusEl.textContent = "Playing (muted; unmute in the player)"; });
+      document.querySelectorAll(".tv-preview-btn").forEach(function (b) {
+        b.addEventListener("click", function () { preview(b.dataset.url, b.dataset.name); });
+      });
+
+      document.querySelectorAll(".tv-rename").forEach(function (b) {
+        b.addEventListener("click", function (e) {
+          var n = prompt("New name", b.dataset.name);
+          if (n === null || !n.trim()) { e.preventDefault(); return; }
+          document.getElementById("tv-rename-value").value = n.trim();
+        });
+      });
+      document.querySelectorAll(".tv-remove").forEach(function (b) {
+        b.addEventListener("click", function (e) {
+          if (!confirm("Remove " + b.dataset.name + "?")) e.preventDefault();
+        });
+      });
+
+      var filter = document.getElementById("tv-filter");
+      if (filter) {
+        var rows = Array.prototype.slice.call(document.querySelectorAll(".tv-row"));
+        var empty = document.getElementById("tv-filter-empty");
+        filter.addEventListener("input", function () {
+          var q = filter.value.trim().toLowerCase(), shown = 0;
+          rows.forEach(function (r) {
+            var hit = !q || r.dataset.search.indexOf(q) !== -1;
+            r.hidden = !hit; if (hit) shown++;
+          });
+          empty.hidden = shown !== 0;
+        });
+      }
+    })();
+  </script>
+{% endblock %}

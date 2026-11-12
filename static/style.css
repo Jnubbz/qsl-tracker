@@ -136,6 +136,8 @@ label {
 input[type="text"],
 input[type="password"],
 input[type="email"],
+input[type="url"],
+input[type="search"],
 input[type="number"],
 input[type="file"],
 textarea {
@@ -150,6 +152,8 @@ textarea {
 input[type="text"]:focus,
 input[type="password"]:focus,
 input[type="email"]:focus,
+input[type="url"]:focus,
+input[type="search"]:focus,
 input[type="number"]:focus,
 textarea:focus {
   outline: none;
@@ -790,3 +794,29 @@ button.secondary { background: transparent; color: var(--ink); border: 1px solid
 
 
 .oot-done { border-color: var(--accent); }
+
+/* TV setup (/admin/tv) */
+.tv-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
+.tv-head h2 { margin: 0; }
+.tv-on { margin: 0.25rem 0 0; }
+.tv-url { margin: 0.15rem 0 0; font-size: 0.85rem; word-break: break-all; }
+.tv-warn { color: #ffb86b; font-size: 0.9rem; }
+.tv-preview { margin-top: 1rem; }
+.tv-preview video { width: 100%; max-width: 640px; aspect-ratio: 16 / 9; background: #000; border-radius: 8px; display: block; }
+.tv-preview-label { margin: 0 0 0.35rem; font-size: 0.9rem; }
+.tv-preview-status { margin: 0.35rem 0; font-size: 0.85rem; min-height: 1.2em; }
+.tv-form { margin-top: 0.5rem; }
+.tv-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-top: 0.5rem; }
+.tv-actions button { align-self: auto; }
+.tv-check { display: flex; gap: 0.5rem; align-items: center; font-weight: normal; }
+.tv-check input { width: auto; }
+.tv-hint { margin: 0; font-size: 0.85rem; }
+.tv-filter { margin: 0.75rem 0 0.25rem; }
+.tv-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.tv-row { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap; padding: 0.6rem 0; border-top: 1px solid var(--border); }
+.tv-row.on .tv-row-name { color: var(--accent); }
+.tv-row-main { display: flex; flex-direction: column; min-width: 0; }
+.tv-row-name { font-weight: 600; overflow-wrap: anywhere; }
+.tv-row-group { font-size: 0.8rem; }
+.tv-row-actions { display: flex; gap: 0.9rem; align-items: center; flex-wrap: wrap; }
+.tv-badge { font-size: 0.8rem; padding: 0.1rem 0.5rem; border-radius: 999px; background: var(--accent); color: #fff; }

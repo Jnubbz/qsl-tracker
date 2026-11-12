@@ -24,6 +24,7 @@ from flask import Flask, Response, abort, flash, jsonify, redirect, render_templ
 import db
 import labels
 import oot_songs
+import tv_channels
 import photomap_store
 import qso_map
 from adif import distinct_callsigns, parse_adif
@@ -189,7 +190,7 @@ def utc_time(ts) -> str:
         return ""
 
 
-SESSIONLESS_ENDPOINTS = frozenset({"healthz", "oot_audio_manifest", "oot_audio_file"})
+SESSIONLESS_ENDPOINTS = frozenset({"healthz", "oot_audio_manifest", "oot_audio_file", "tv_config"})
 
 
 @app.before_request
@@ -259,6 +260,7 @@ def request_too_large(_exc):
         "raw_address_adif_batch": "raw_address",
         "request_qsl": "request_qsl",
         "admin_oot_upload": "admin_oot",
+        "admin_tv_upload": "admin_tv",
     }
     return redirect(url_for(targets.get(request.endpoint, "index")))
 
@@ -840,6 +842,121 @@ def oot_audio_file(name):
     if not path.is_file():
         abort(404)
     return send_file(path, mimetype=oot_songs.AUDIO_TYPES[ext], conditional=True, max_age=86400)
+
+
+# ---------------------------------------------------------------------
+# kn0ble.com/tv. Josh pastes stream URLs or uploads an IPTV .m3u at
+# /admin/tv and picks the channel that's "on TV". kn0ble.com's nginx
+# proxies /tv/config.json to the public /tv-config.json below; the /tv
+# page only plays. Stored by tv_channels on the data volume.
+# ---------------------------------------------------------------------
+
+@app.route("/admin/tv")
+@admin_required
+def admin_tv():
+    data = tv_channels.load()
+    active = next((c for c in data["channels"] if c["id"] == data["active"]), None)
+    return render_template(
+        "admin_tv.html",
+        channels=data["channels"],
+        active=active,
+        max_mb=MAX_UPLOAD_BYTES // (1024 * 1024),
+    )
+
+
+@app.route("/admin/tv/add", methods=["POST"])
+@admin_required
+def admin_tv_add():
+    url = request.form.get("url", "")
+    name = request.form.get("name", "")
+    try:
+        ch = tv_channels.add(name, url)
+    except ValueError as exc:
+        flash(f"Couldn't add that: {exc}.", "error")
+        return redirect(url_for("admin_tv"))
+    if request.form.get("play") == "1":
+        tv_channels.set_active(ch["id"])
+        flash(f"{ch['name']} is on TV now.", "success")
+    else:
+        flash(f"Added {ch['name']}.", "success")
+    return redirect(url_for("admin_tv"))
+
+
+@app.route("/admin/tv/upload", methods=["POST"])
+@admin_required
+def admin_tv_upload():
+    upload = request.files.get("playlist")
+    if upload is None or not upload.filename:
+        flash("Pick a playlist file first.", "error")
+        return redirect(url_for("admin_tv"))
+    # Any extension (.m3u, .m3u8, a typo'd .3mu, none): the content
+    # decides. Binary files fail the "no channels" check below.
+    raw = upload.read()
+    if b"\x00" in raw[:4096]:
+        flash("That isn't a playlist file (it isn't text).", "error")
+        return redirect(url_for("admin_tv"))
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        text = raw.decode("latin-1")
+    try:
+        channels = tv_channels.parse_m3u(text)
+    except tv_channels.NotAChannelList:
+        flash("That file is a stream itself, not a channel list. It only plays from its own "
+              "server, so paste the stream's URL instead.", "error")
+        return redirect(url_for("admin_tv"))
+    if not channels:
+        flash("No channels found in that file.", "error")
+        return redirect(url_for("admin_tv"))
+    added, skipped = tv_channels.add_many(channels, replace=request.form.get("replace") == "1")
+    msg = f"Added {added} channel{'s' if added != 1 else ''}"
+    if skipped:
+        msg += f" ({skipped} already here or over the limit)"
+    flash(msg + ".", "success")
+    return redirect(url_for("admin_tv"))
+
+
+@app.route("/admin/tv/<channel_id>/play", methods=["POST"])
+@admin_required
+def admin_tv_play(channel_id):
+    ch = tv_channels.set_active(channel_id)
+    if not ch:
+        abort(404)
+    flash(f"{ch['name']} is on TV now.", "success")
+    return redirect(url_for("admin_tv"))
+
+
+@app.route("/admin/tv/<channel_id>/rename", methods=["POST"])
+@admin_required
+def admin_tv_rename(channel_id):
+    if not tv_channels.rename(channel_id, request.form.get("name", "")):
+        flash("Couldn't rename that channel.", "error")
+    return redirect(url_for("admin_tv"))
+
+
+@app.route("/admin/tv/<channel_id>/delete", methods=["POST"])
+@admin_required
+def admin_tv_delete(channel_id):
+    if tv_channels.delete(channel_id):
+        flash("Removed.", "success")
+    return redirect(url_for("admin_tv"))
+
+
+@app.route("/admin/tv/clear", methods=["POST"])
+@admin_required
+def admin_tv_clear():
+    tv_channels.clear()
+    flash("All channels removed.", "success")
+    return redirect(url_for("admin_tv"))
+
+
+@app.route("/tv-config.json")
+def tv_config():
+    """Public: the channel that's on TV. Never cached, so switching
+    channels at /admin/tv reaches the /tv page on its next check."""
+    resp = jsonify(tv_channels.public_config())
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 # ---------------------------------------------------------------------
