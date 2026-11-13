@@ -214,6 +214,22 @@ class SyncTests(unittest.TestCase):
         self.assertTrue(resumed, book.calls)
         self.assertIsNone(resumed[0]["since"])
 
+    def test_sync_flash_still_shows_with_one_sync_button(self):
+        today = date.today().strftime("%Y%m%d")
+        book = FakeLogbook([{"logid": 9, "call": "W1AW", "qso_date": today}])
+        book.install()
+        response = self._sync()
+        body = response.get_data(as_text=True)
+        self.assertIn(
+            "Fetched 1 QSO(s) from QRZ: 1 new. Up to date with your QRZ Logbook.",
+            body,
+        )
+        self.assertEqual(body.count(">Sync from QRZ</button>"), 1)
+        self.assertIn(">Find missing QSOs</button>", body)
+        self.assertIn(">Re-sync everything from the start</button>", body)
+        self.assertIn('name="adif_file"', body)
+        self.assertIn('class="flash flash-success"', body)
+
     def test_future_date_does_not_freeze_the_window(self):
         photomap_store.import_my_qsos([qso("FUTURE", 1, qso_date="20990101")])
         self.assertEqual(photomap_store.newest_qso_date(), "")

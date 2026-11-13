@@ -67,10 +67,3 @@
   <label for="note">Note (optional)</label>
   <input type="text" id="note" name="note" value="{{ card.note or '' }}" placeholder="e.g. Field Day 2026">
 {%- endmacro %}
-
-{% macro cards_tabs(active) -%}
-  <nav class="section-tabs" aria-label="QSL Cards">
-    <a href="{{ url_for('admin_photomap_manage') }}"{% if active == 'manage' %} class="active" aria-current="page"{% endif %}>All cards</a>
-    <a href="{{ url_for('admin_photomap_upload') }}"{% if active == 'upload' %} class="active" aria-current="page"{% endif %}>Upload</a>
-  </nav>
-{%- endmacro %}
