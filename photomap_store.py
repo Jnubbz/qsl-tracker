@@ -136,7 +136,27 @@ def save_callsign_location(loc) -> None:
 # callsign can have several (repeat contacts, multiple cards); each
 # entry carries its own list of S3 image keys directly (no separate
 # join table needed now that this isn't relational storage).
+#
+# Each image entry is {"s3_key": ..., "source": "paper" | "electronic"}
+# -- "paper" is a scanned card someone uploaded by hand (the upload or
+# edit page); "electronic" is a photo that arrived via the automatic
+# eQSL import. A card's Paper/Electronic/Hybrid badge (card_photo_type()
+# below) is derived from its images' sources, never set directly --
+# so a card that's picked up one of each becomes "hybrid" on its own,
+# the moment a second kind of image lands on it. Images saved before
+# this field existed are bare strings in the stored JSON; _image_source()
+# and _image_key() below treat those as "paper" (everything before the
+# eQSL importer existed was a manual scan) so old data keeps working.
 # ---------------------------------------------------------------------
+
+def _image_key(entry) -> str:
+    return entry["s3_key"] if isinstance(entry, dict) else entry
+
+
+def _image_source(entry) -> str:
+    if isinstance(entry, dict):
+        return entry.get("source") or "paper"
+    return "paper"
 
 def add_photo_card(
     callsign: str, qso_date: str, band: str, mode: str, freq: str,
@@ -162,22 +182,46 @@ def add_photo_card(
     return _update(mutate)
 
 
-def add_photo_card_image(photo_card_id: int, s3_key: str) -> None:
+def add_photo_card_image(photo_card_id: int, s3_key: str, source: str = "paper") -> None:
+    """source is "paper" (the default -- a manual upload or edit-page
+    add) or "electronic" (the automatic eQSL import). See the module
+    note above: this is the only place a source is set, and a card's
+    type badge always follows from what's actually on it."""
     def mutate(data):
         for card in data["photo_cards"]:
             if card["id"] == photo_card_id:
-                card["images"].append(s3_key)
+                card["images"].append({"s3_key": s3_key, "source": source})
                 return True, None
         return False, None
     _update(mutate)
 
 
-def list_map_points() -> list[dict]:
-    """One entry per callsign that has at least one photo card and a
-    known lat/lon -- what the public map plots as pins."""
+def card_photo_type(card: dict) -> str:
+    """"paper", "electronic", "hybrid" (this one card has both kinds of
+    image), or "none" (no photo yet). Used to filter the manage page
+    and the public map -- see admin_photomap_manage() / photomap_api_pins()
+    in app.py."""
+    sources = {_image_source(e) for e in card["images"]}
+    if not sources:
+        return "none"
+    if sources == {"paper"}:
+        return "paper"
+    if sources == {"electronic"}:
+        return "electronic"
+    return "hybrid"
+
+
+def list_map_points(type_filter: str | None = None) -> list[dict]:
+    """One entry per callsign that has at least one photo card (matching
+    type_filter, when given -- "paper" / "electronic" / "hybrid") and a
+    known lat/lon -- what the public map plots as pins. card_count only
+    counts the matching cards, so the tooltip stays consistent with the
+    filter that's active."""
     data = _load()
     counts: dict[str, int] = {}
     for card in data["photo_cards"]:
+        if type_filter and card_photo_type(card) != type_filter:
+            continue
         counts[card["callsign"]] = counts.get(card["callsign"], 0) + 1
 
     points = []
@@ -210,7 +254,10 @@ def get_images_for_card(photo_card_id: int) -> list[dict]:
     data = _load()
     for card in data["photo_cards"]:
         if card["id"] == photo_card_id:
-            return [{"s3_key": key} for key in card["images"]]
+            return [
+                {"s3_key": _image_key(e), "source": _image_source(e)}
+                for e in card["images"]
+            ]
     return []
 
 
@@ -266,9 +313,13 @@ def remove_photo_card_image(card_id: int, s3_key: str) -> bool:
     found."""
     def mutate(data):
         for card in data["photo_cards"]:
-            if card["id"] == card_id and s3_key in card["images"]:
-                card["images"].remove(s3_key)
-                return True, True
+            if card["id"] != card_id:
+                continue
+            for entry in card["images"]:
+                if _image_key(entry) == s3_key:
+                    card["images"].remove(entry)
+                    return True, True
+            return False, False
         return False, False
     return _update(mutate)
 

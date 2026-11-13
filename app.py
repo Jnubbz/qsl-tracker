@@ -152,6 +152,27 @@ QRZ_SYNC_HARD_LIMIT_SECONDS = 25
 # date too -- see admin_log_sync().
 QRZ_SYNC_RECENT_DAYS = 7
 
+# Valid values for the "how did this card's photo(s) arrive" filter on
+# the manage page and the public map -- see photomap_store.card_photo_type().
+PHOTO_CARD_TYPES = ("paper", "electronic", "hybrid")
+
+# Bearer-style token for the automatic eQSL-from-Gmail import (see
+# admin_photomap_import_eqsl() below). Deliberately separate from
+# ADMIN_PASSWORD: this one is held by a scheduled background job, not
+# typed in by Josh, so it needs to be rotatable/revocable on its own
+# without touching his actual login.
+EQSL_IMPORT_TOKEN = os.environ.get("EQSL_IMPORT_TOKEN", "")
+
+# QRZ XML Data API credentials for that same import job, so it can look
+# up a new callsign's location without a human QRZ session active (the
+# manual upload flow borrows the admin's live session instead -- see
+# admin_photomap_upload() -- but nothing is "live" when a scheduled job
+# runs at 3am). Optional: if unset, imported cards still save, they just
+# won't have a map location until Josh looks the callsign up himself
+# (same as any upload would, with QRZ down or logged out).
+QRZ_USERNAME = os.environ.get("QRZ_USERNAME", "")
+QRZ_PASSWORD = os.environ.get("QRZ_PASSWORD", "")
+
 # Big logs make an unfiltered QSO Labels table enormous -- show this
 # many most-recent rows and ask for a filter to see further back. The
 # page has a "Show" dropdown (QSO_TABLE_SHOW_OPTIONS), remembered in the
@@ -209,9 +230,12 @@ def ensure_session():
 
 # /request-qsl is posted from plain HTML on kn0ble.com, which cannot
 # carry a token minted here. /healthz is the unauthenticated probe.
-# Every other POST must present the token stored in the session
-# (hidden form field or X-CSRF-Token).
-CSRF_EXEMPT_ENDPOINTS = frozenset({"request_qsl", "healthz"})
+# admin_photomap_import_eqsl is the scheduled eQSL-import job's
+# endpoint -- it has no browser session to carry a CSRF token at all,
+# and authenticates with its own EQSL_IMPORT_TOKEN header instead (see
+# that route). Every other POST must present the token stored in the
+# session (hidden form field or X-CSRF-Token).
+CSRF_EXEMPT_ENDPOINTS = frozenset({"request_qsl", "healthz", "admin_photomap_import_eqsl"})
 
 
 def _csrf_token() -> str:
@@ -2100,19 +2124,138 @@ def admin_photomap_upload():
     )
 
 
+def _eqsl_import_authorized() -> bool:
+    token = request.headers.get("X-Eqsl-Import-Token", "")
+    return bool(EQSL_IMPORT_TOKEN) and secrets.compare_digest(token, EQSL_IMPORT_TOKEN)
+
+
+@app.route("/admin/photomap/api/import-eqsl", methods=["POST"])
+def admin_photomap_import_eqsl():
+    """Machine endpoint for the automatic eQSL-from-Gmail import --
+    adds one photo card the same way admin_photomap_upload() does, but
+    authenticated by EQSL_IMPORT_TOKEN instead of an admin session,
+    since the caller is a scheduled background job with nobody logged
+    in. See README's "Automatic eQSL import" section for the full
+    picture (what sends this, how duplicates are avoided on the Gmail
+    side via a label, what fields are required vs optional).
+
+    Fields (multipart/form-data): `callsign` (required), `image`
+    (required, the card file), and the usual optional QSO fields --
+    `qso_date`, `band`, `mode`, `freq`, `rst_sent`, `rst_rcvd`, `note`.
+    A card with no QSO fields saves anyway, flagged "No QSO info" on
+    the manage page exactly like a manual upload missing that info --
+    Josh's call (see the project notes), since several real eQSL
+    senders (QSLMaster's bureau relay, World Radio League) genuinely
+    don't include QSO specifics in the notification email at all.
+
+    One card per callsign (Josh's call): unlike the manual upload page
+    (which always makes a new card -- a human choosing to add another
+    one is deliberate), this endpoint reuses the callsign's existing
+    card when it already has one -- the new photo is appended to it
+    instead of creating a second entry, and any QSO field that's still
+    blank on the existing card gets filled in from this import (a
+    field that's already set is left alone, so this never clobbers
+    something Josh typed in by hand on the manage/edit page). Picks
+    the most recent card when a callsign somehow already has more than
+    one (from before this rule, or a manual upload).
+    """
+    if not EQSL_IMPORT_TOKEN:
+        return {"error": "EQSL_IMPORT_TOKEN isn't configured on the server."}, 503
+    if not _eqsl_import_authorized():
+        return {"error": "Bad or missing import token."}, 401
+
+    callsign = request.form.get("callsign", "").strip().upper()
+    if not callsign:
+        return {"error": "Missing callsign."}, 400
+    image = request.files.get("image")
+    if not image or not image.filename:
+        return {"error": "Missing image file."}, 400
+
+    qso_date = request.form.get("qso_date", "").strip()
+    band = request.form.get("band", "").strip().upper()
+    mode = request.form.get("mode", "").strip().upper()
+    freq = request.form.get("freq", "").strip()
+    rst_sent = request.form.get("rst_sent", "").strip()
+    rst_rcvd = request.form.get("rst_rcvd", "").strip()
+    note = request.form.get("note", "").strip()
+
+    try:
+        location = photomap_store.get_callsign_location(callsign)
+    except S3Error as exc:
+        return {"error": s3_config_hint(exc)}, 502
+
+    if location is None and QRZ_USERNAME and QRZ_PASSWORD:
+        try:
+            key = get_session_key(QRZ_USERNAME, QRZ_PASSWORD)
+            loc = lookup_location(key, callsign)
+            photomap_store.save_callsign_location(loc)
+            location = photomap_store.get_callsign_location(callsign)
+        except QrzError as exc:
+            logger.warning("eQSL import: QRZ lookup failed for %s: %s", callsign, exc)
+        except Exception:
+            logger.warning("eQSL import: QRZ unreachable for %s", callsign)
+
+    try:
+        existing = photomap_store.get_cards_for_callsign(callsign)
+        reused_existing_card = bool(existing)
+        if existing:
+            card = existing[0]
+            card_id = card["id"]
+            merged = {
+                "qso_date": card["qso_date"] or qso_date,
+                "band": card["band"] or band,
+                "mode": card["mode"] or mode,
+                "freq": card["freq"] or freq,
+                "rst_sent": card["rst_sent"] or rst_sent,
+                "rst_rcvd": card["rst_rcvd"] or rst_rcvd,
+                "note": card["note"] or note,
+            }
+            if any(merged[f] != card[f] for f in merged):
+                photomap_store.update_photo_card(card_id, **merged)
+        else:
+            card_id = photomap_store.add_photo_card(callsign, qso_date, band, mode, freq, rst_sent, rst_rcvd, note)
+        img_key = upload_card_image(image, callsign)
+        photomap_store.add_photo_card_image(card_id, img_key, source="electronic")
+    except S3Error as exc:
+        return {"error": s3_config_hint(exc)}, 502
+
+    return {
+        "ok": True,
+        "card_id": card_id,
+        "callsign": callsign,
+        "has_location": location is not None,
+        "reused_existing_card": reused_existing_card,
+    }
+
+
 @app.route("/admin/photomap/manage")
 @admin_required
 def admin_photomap_manage():
     """Every uploaded card, callsign by callsign, with Edit/Delete
     actions -- for fixing entries that went up without a photo or
     without QSO info (both are optional at upload time; this is where
-    that gets cleaned up after the fact)."""
+    that gets cleaned up after the fact).
+
+    ?type=paper|electronic|hybrid filters the list by how each card's
+    photo(s) arrived -- see photomap_store.card_photo_type(). A card
+    with no photo yet doesn't match any of the three, so it only shows
+    up with no filter applied."""
+    type_filter = request.args.get("type", "").strip().lower()
+    if type_filter not in PHOTO_CARD_TYPES:
+        type_filter = ""
     try:
         cards = photomap_store.list_all_photo_cards()
     except S3Error as exc:
         flash(s3_config_hint(exc), "error")
         cards = []
-    return render_template("admin_photomap_manage.html", cards=cards)
+    if type_filter:
+        cards = [c for c in cards if photomap_store.card_photo_type(c) == type_filter]
+    return render_template(
+        "admin_photomap_manage.html",
+        cards=cards,
+        type_filter=type_filter,
+        card_photo_type=photomap_store.card_photo_type,
+    )
 
 
 @app.route("/admin/photomap/edit/<int:card_id>", methods=["GET", "POST"])
@@ -2185,7 +2328,8 @@ def admin_photomap_edit(card_id):
         flash(s3_config_hint(exc), "error")
         images = []
     image_entries = [
-        {"s3_key": img["s3_key"], "url": url_for("photomap_image", key=img["s3_key"])} for img in images
+        {"s3_key": img["s3_key"], "source": img["source"], "url": url_for("photomap_image", key=img["s3_key"])}
+        for img in images
     ]
     return render_template("admin_photomap_edit.html", card=card, images=image_entries)
 
@@ -2215,7 +2359,10 @@ def admin_photomap_delete(card_id):
 
 @app.route("/photomap")
 def photomap():
-    return render_template("photomap.html")
+    type_filter = request.args.get("type", "").strip().lower()
+    if type_filter not in PHOTO_CARD_TYPES:
+        type_filter = ""
+    return render_template("photomap.html", type_filter=type_filter)
 
 
 @app.route("/photomap/image/<path:key>")
@@ -2246,8 +2393,11 @@ def photomap_image(key):
 
 @app.route("/photomap/api/pins")
 def photomap_api_pins():
+    type_filter = request.args.get("type", "").strip().lower()
+    if type_filter not in PHOTO_CARD_TYPES:
+        type_filter = ""
     try:
-        points = photomap_store.list_map_points()
+        points = photomap_store.list_map_points(type_filter or None)
     except S3Error as exc:
         logger.warning("QSL Photo Map S3 error: %s", exc)
         return {"pins": [], "error": str(exc)}

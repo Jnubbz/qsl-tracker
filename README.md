@@ -421,6 +421,75 @@ the dashboard instead of storing them in the repo:
 If any of the AWS vars are missing, the admin upload form will show an
 S3 error when you try to save a card rather than failing silently.
 
+### Automatic eQSL import
+
+`POST /admin/photomap/api/import-eqsl` adds a card the same way the
+manual upload page does, but it's meant to be called by a scheduled
+background job instead of a logged-in admin -- so it's authenticated
+by a bearer-style header (`X-Eqsl-Import-Token`, checked against the
+`EQSL_IMPORT_TOKEN` env var) instead of the admin session, and is
+exempt from the site's usual CSRF check for the same reason (no
+browser session to carry a CSRF token in the first place).
+
+Fields (`multipart/form-data`): `callsign` and `image` are required;
+`qso_date`, `band`, `mode`, `freq`, `rst_sent`, `rst_rcvd`, `note` are
+all optional. A card with none of the QSO fields still saves -- it
+shows up on `/admin/photomap/manage` flagged "No QSO info," exactly
+like a manual upload missing that info, because several real eQSL
+senders (a QSLMaster bureau relay like `<call>@bureau.e-qsl.com`,
+World Radio League) genuinely never include QSO specifics in the
+notification email at all.
+
+One card per callsign: unlike the manual upload page (which always
+creates a new card, since a human choosing to add another one is
+deliberate), repeat imports for a callsign that already has a card
+attach the new photo to that same card instead of making a duplicate,
+and fill in any QSO field that's still blank -- a field already set
+(by an earlier import, or by Josh on the manage/edit page) is never
+overwritten.
+
+If the callsign's map location isn't already cached, the endpoint logs
+into QRZ itself using `QRZ_USERNAME`/`QRZ_PASSWORD` (separate from the
+Logbook API key above -- these are the regular XML Data API login) to
+look it up, since there's no human admin session to borrow the way the
+manual upload page does. Both are optional: without them (or if QRZ is
+unreachable), the card still saves, just without a map pin until the
+callsign is looked up some other way.
+
+**What drives this**: a daily scheduled Claude task, not anything
+running on the Unraid box. It searches Gmail for new eQSL emails with
+an attachment, downloads the card image, reads whatever QSO details
+the email happens to include, and posts here -- then labels the Gmail
+message so it isn't reprocessed. It deliberately only catches eQSLs
+that arrive as a real email attachment (OpsLog, DigiQSL, the
+QSLMaster bureau relay, World Radio League, and similar); eQSL.cc's
+own "a new card is waiting for you" notifications never include the
+actual card, only a link to log into eqsl.cc and fetch it manually --
+there's no way to get those via email alone. Runs quietly; a failed
+import just isn't labeled, so it's retried the next day.
+
+### Paper / Electronic / Hybrid
+
+Every image on a card remembers how it arrived -- `paper` for a scan
+added through the upload or edit page, `electronic` for one that came
+in through the automatic eQSL import above. A card's own badge (shown
+on `/admin/photomap/manage` and filterable there, and on the public
+`/photomap` map) is derived from that, never set by hand: all-paper
+images make it "Paper", all-electronic makes it "Electronic", and a
+card that's picked up one of each (an eQSL landing on a callsign that
+already had a mailed card, or the other way around) becomes "Hybrid"
+on its own the moment the second kind of image lands on it. A card
+with no photo yet doesn't match any of the three, so it only shows up
+with no filter applied.
+
+Both pages have an All / Paper / Electronic / Hybrid toggle
+(`?type=paper|electronic|hybrid` on `/admin/photomap/manage` and
+`/photomap`, and on the `/photomap/api/pins` JSON endpoint behind it)
+-- picking one narrows the list, or the map's pins, to cards of that
+type. Images saved before this field existed are treated as "Paper"
+(everything before the eQSL importer existed was a manual scan), so
+nothing already on the map needs fixing up.
+
 ## Project status
 
 Early / brainstorming-to-working-prototype stage. Next up:

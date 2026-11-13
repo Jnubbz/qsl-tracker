@@ -18,6 +18,7 @@
         {% for img in images %}
           <label class="card-thumb">
             <img src="{{ img['url'] }}" alt="{{ card['callsign'] }} QSL card">
+            <span class="badge-type badge-{{ img['source'] }}">{{ img['source'] | capitalize }}</span>
             <span><input type="checkbox" name="remove_image" value="{{ img['s3_key'] }}" form="edit-form"> Remove</span>
           </label>
         {% endfor %}

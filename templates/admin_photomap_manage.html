@@ -11,11 +11,18 @@
       details) until fixed here.
     </p>
 
+    <div class="filter-toggle">
+      <a href="{{ url_for('admin_photomap_manage') }}" class="{{ 'active' if not type_filter }}">All</a>
+      <a href="{{ url_for('admin_photomap_manage', type='paper') }}" class="{{ 'active' if type_filter == 'paper' }}">Paper</a>
+      <a href="{{ url_for('admin_photomap_manage', type='electronic') }}" class="{{ 'active' if type_filter == 'electronic' }}">Electronic</a>
+      <a href="{{ url_for('admin_photomap_manage', type='hybrid') }}" class="{{ 'active' if type_filter == 'hybrid' }}">Hybrid</a>
+    </div>
+
     {% if cards %}
       <div class="table-scroll">
       <table class="contacts">
         <thead>
-          <tr><th>Callsign</th><th>Date</th><th>Band / Mode</th><th>Photos</th><th>Note</th><th></th></tr>
+          <tr><th>Callsign</th><th>Date</th><th>Band / Mode</th><th>Photos</th><th>Type</th><th>Note</th><th></th></tr>
         </thead>
         <tbody>
           {% for c in cards %}
@@ -36,6 +43,14 @@
                   <span class="flag-missing">No photo</span>
                 {% endif %}
               </td>
+              <td>
+                {% set ptype = card_photo_type(c) %}
+                {% if ptype != 'none' %}
+                  <span class="badge-type badge-{{ ptype }}">{{ ptype | capitalize }}</span>
+                {% else %}
+                  <span class="muted">-</span>
+                {% endif %}
+              </td>
               <td>{{ c['note'] or '-' }}</td>
               <td>
                 <a href="{{ url_for('admin_photomap_edit', card_id=c['id']) }}">Edit</a>
@@ -52,6 +67,8 @@
         </tbody>
       </table>
       </div>
+    {% elif type_filter %}
+      <p class="muted">No {{ type_filter }} cards.</p>
     {% else %}
       <p class="muted">No cards uploaded yet.</p>
     {% endif %}
