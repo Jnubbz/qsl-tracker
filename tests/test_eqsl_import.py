@@ -208,7 +208,9 @@ class EqslImportTests(unittest.TestCase):
         self.post(callsign="KE9GKG")
         with self.client.session_transaction() as sess:
             sess["is_admin"] = True
-        resp = self.client.get("/admin/photomap/manage")
+        # bare manage page now defaults to the "paper" filter, so look at
+        # "all" explicitly -- these two cards are both electronic imports.
+        resp = self.client.get("/admin/photomap/manage?type=all")
         self.assertEqual(resp.status_code, 200)
         html = resp.get_data(as_text=True)
         self.assertIn("EA3FAB", html)

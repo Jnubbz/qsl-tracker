@@ -154,7 +154,24 @@ QRZ_SYNC_RECENT_DAYS = 7
 
 # Valid values for the "how did this card's photo(s) arrive" filter on
 # the manage page and the public map -- see photomap_store.card_photo_type().
+# "hybrid" has no pill in the UI (it's rarely more than a couple of cards,
+# and "All" already includes them) but a direct ?type=hybrid link still
+# works, so it stays a valid value here.
 PHOTO_CARD_TYPES = ("paper", "electronic", "hybrid")
+
+
+def _resolve_photo_type_filter():
+    """Reads this request's ?type= filter for the photo map / manage page.
+
+    No ?type= at all (a bare visit) defaults to "paper" -- that's the
+    common case Josh actually wants to see day to day. An explicit
+    ?type=all, or anything that isn't one of PHOTO_CARD_TYPES, means "no
+    filter, show everything" (empty string, same meaning it always had)."""
+    raw = request.args.get("type")
+    if raw is None:
+        return "paper"
+    raw = raw.strip().lower()
+    return raw if raw in PHOTO_CARD_TYPES else ""
 
 # Bearer-style token for the automatic eQSL-from-Gmail import (see
 # admin_photomap_import_eqsl() below). Deliberately separate from
@@ -2237,12 +2254,10 @@ def admin_photomap_manage():
     that gets cleaned up after the fact).
 
     ?type=paper|electronic|hybrid filters the list by how each card's
-    photo(s) arrived -- see photomap_store.card_photo_type(). A card
-    with no photo yet doesn't match any of the three, so it only shows
-    up with no filter applied."""
-    type_filter = request.args.get("type", "").strip().lower()
-    if type_filter not in PHOTO_CARD_TYPES:
-        type_filter = ""
+    photo(s) arrived -- see photomap_store.card_photo_type(). A bare visit
+    (no ?type=) defaults to paper; ?type=all shows everything, including
+    a card with no photo yet (which doesn't match any of the three)."""
+    type_filter = _resolve_photo_type_filter()
     try:
         cards = photomap_store.list_all_photo_cards()
     except S3Error as exc:
@@ -2359,9 +2374,7 @@ def admin_photomap_delete(card_id):
 
 @app.route("/photomap")
 def photomap():
-    type_filter = request.args.get("type", "").strip().lower()
-    if type_filter not in PHOTO_CARD_TYPES:
-        type_filter = ""
+    type_filter = _resolve_photo_type_filter()
     return render_template("photomap.html", type_filter=type_filter)
 
 
@@ -2393,9 +2406,7 @@ def photomap_image(key):
 
 @app.route("/photomap/api/pins")
 def photomap_api_pins():
-    type_filter = request.args.get("type", "").strip().lower()
-    if type_filter not in PHOTO_CARD_TYPES:
-        type_filter = ""
+    type_filter = _resolve_photo_type_filter()
     try:
         points = photomap_store.list_map_points(type_filter or None)
     except S3Error as exc:

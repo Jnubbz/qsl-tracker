@@ -12,10 +12,9 @@
     </p>
 
     <div class="filter-toggle">
-      <a href="{{ url_for('admin_photomap_manage') }}" class="{{ 'active' if not type_filter }}">All</a>
       <a href="{{ url_for('admin_photomap_manage', type='paper') }}" class="{{ 'active' if type_filter == 'paper' }}">Paper</a>
       <a href="{{ url_for('admin_photomap_manage', type='electronic') }}" class="{{ 'active' if type_filter == 'electronic' }}">Electronic</a>
-      <a href="{{ url_for('admin_photomap_manage', type='hybrid') }}" class="{{ 'active' if type_filter == 'hybrid' }}">Hybrid</a>
+      <a href="{{ url_for('admin_photomap_manage', type='all') }}" class="{{ 'active' if not type_filter }}">All</a>
     </div>
 
     {% if cards %}

@@ -13,10 +13,9 @@
     <h1>QSL Photo Map</h1>
     <p class="muted">Scanned QSL cards, plotted by station. Click a pin to see the card.</p>
     <div class="filter-toggle">
-      <a href="{{ url_for('photomap') }}" class="{{ 'active' if not type_filter }}">All</a>
       <a href="{{ url_for('photomap', type='paper') }}" class="{{ 'active' if type_filter == 'paper' }}">Paper</a>
       <a href="{{ url_for('photomap', type='electronic') }}" class="{{ 'active' if type_filter == 'electronic' }}">Electronic</a>
-      <a href="{{ url_for('photomap', type='hybrid') }}" class="{{ 'active' if type_filter == 'hybrid' }}">Hybrid</a>
+      <a href="{{ url_for('photomap', type='all') }}" class="{{ 'active' if not type_filter }}">All</a>
     </div>
     <div id="map"></div>
   </section>
@@ -41,8 +40,7 @@
     var clusters = L.markerClusterGroup();
     var cache = {}; // callsign -> already-fetched detail JSON, so re-clicking a pin doesn't re-fetch
 
-    var pinsUrl = '{{ url_for("photomap_api_pins") }}'
-      {% if type_filter %}+ '?type={{ type_filter }}'{% endif %};
+    var pinsUrl = '{{ url_for("photomap_api_pins") }}?type={{ type_filter or "all" }}';
 
     fetch(pinsUrl)
       .then(function (r) { return r.json(); })

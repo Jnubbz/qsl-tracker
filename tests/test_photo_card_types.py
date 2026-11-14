@@ -114,7 +114,7 @@ class CardPhotoTypeIntegrationTests(unittest.TestCase):
         self._manual_upload("EA3FAB")
         self._eqsl_import("F5TGY")
 
-        all_resp = self.client.get("/admin/photomap/manage")
+        all_resp = self.client.get("/admin/photomap/manage?type=all")
         html = all_resp.get_data(as_text=True)
         self.assertIn("EA3FAB", html)
         self.assertIn("F5TGY", html)
@@ -135,6 +135,35 @@ class CardPhotoTypeIntegrationTests(unittest.TestCase):
         self.assertNotIn("F5TGY", hybrid_html)
         self.assertIn("No hybrid cards.", hybrid_html)
 
+    def test_manage_page_defaults_to_paper_with_no_type_param(self):
+        # A bare visit (no ?type= at all) now shows paper cards only --
+        # Josh's ask: paper is the common case, "All" is one click away.
+        self._seed_location("EA3FAB")
+        self._manual_upload("EA3FAB")
+        self._eqsl_import("F5TGY")
+
+        resp = self.client.get("/admin/photomap/manage")
+        html = resp.get_data(as_text=True)
+        self.assertIn("EA3FAB", html)
+        self.assertNotIn("F5TGY", html)
+
+        resp = self.client.get("/admin/photomap/manage?type=all")
+        html = resp.get_data(as_text=True)
+        self.assertIn("EA3FAB", html)
+        self.assertIn("F5TGY", html)
+
+    def test_manage_page_has_no_hybrid_pill_but_the_link_still_works(self):
+        self._seed_location("EA3FAB")
+        self._manual_upload("EA3FAB")
+        self._eqsl_import("EA3FAB")  # same callsign -> hybrid
+
+        resp = self.client.get("/admin/photomap/manage")
+        html = resp.get_data(as_text=True)
+        self.assertNotIn(">Hybrid<", html)
+
+        hybrid_resp = self.client.get("/admin/photomap/manage?type=hybrid")
+        self.assertIn("EA3FAB", hybrid_resp.get_data(as_text=True))
+
     def test_manage_page_ignores_a_bogus_type_value(self):
         # Not "paper"/"electronic"/"hybrid" -- treated the same as no
         # filter at all, instead of erroring or silently showing nothing.
@@ -149,7 +178,7 @@ class CardPhotoTypeIntegrationTests(unittest.TestCase):
         self._eqsl_import("F5TGY")
         photomap_store.save_callsign_location(_Loc("F5TGY"))
 
-        all_pins = self.client.get("/photomap/api/pins").get_json()["pins"]
+        all_pins = self.client.get("/photomap/api/pins?type=all").get_json()["pins"]
         self.assertEqual({p["callsign"] for p in all_pins}, {"EA3FAB", "F5TGY"})
 
         paper_pins = self.client.get("/photomap/api/pins?type=paper").get_json()["pins"]
@@ -157,6 +186,15 @@ class CardPhotoTypeIntegrationTests(unittest.TestCase):
 
         electronic_pins = self.client.get("/photomap/api/pins?type=electronic").get_json()["pins"]
         self.assertEqual({p["callsign"] for p in electronic_pins}, {"F5TGY"})
+
+    def test_pins_api_defaults_to_paper_with_no_type_param(self):
+        self._seed_location("EA3FAB")
+        self._manual_upload("EA3FAB")
+        self._eqsl_import("F5TGY")
+        photomap_store.save_callsign_location(_Loc("F5TGY"))
+
+        default_pins = self.client.get("/photomap/api/pins").get_json()["pins"]
+        self.assertEqual({p["callsign"] for p in default_pins}, {"EA3FAB"})
 
         hybrid_pins = self.client.get("/photomap/api/pins?type=hybrid").get_json()["pins"]
         self.assertEqual(hybrid_pins, [])
