@@ -4,14 +4,14 @@
   <section class="card tv-now">
     <div class="tv-head">
       <h1>TV setup</h1>
-      <a href="https://kn0ble.com/tv" target="_blank" rel="noopener">Open kn0ble.com/tv</a>
+      <span><a href="https://kn0ble.com/tv" target="_blank" rel="noopener">/tv</a> &middot; <a href="https://kn0ble.com/stream/" target="_blank" rel="noopener">/stream</a></span>
     </div>
     {% if active %}
-      <p class="tv-on">On TV now: <strong>{{ active.name }}</strong></p>
+      <p class="tv-on">Default channel: <strong>{{ active.name }}</strong></p>
       <p class="muted tv-url">{{ active.url }}</p>
-      <p class="muted tv-hint">kn0ble.com/tv plays this through your server, so http links, raw IPTV streams and blocked sites work there even when Preview below can't.</p>
+      <p class="muted tv-hint">kn0ble.com/tv plays this channel; kn0ble.com/stream has the full menu. It plays everything through your server, so http links, raw IPTV streams and blocked sites work there even when Preview below can't.</p>
     {% else %}
-      <p class="muted">Nothing is on TV. Add a stream below{% if channels %} or pick one from the list{% endif %}.</p>
+      <p class="muted">No default channel. Add a stream below{% if channels %} or pick one from the list{% endif %}.</p>
     {% endif %}
 
     <div class="tv-preview">
@@ -33,7 +33,7 @@
       <label for="tv-name">Name <span class="muted">(optional)</span></label>
       <input id="tv-name" type="text" name="name" maxlength="120" autocomplete="off">
       <div class="tv-actions">
-        <button type="submit" name="play" value="1">Add &amp; put on TV</button>
+        <button type="submit" name="play" value="1">Add &amp; make default</button>
         <button type="submit" class="secondary">Just add</button>
       </div>
     </form>
@@ -49,6 +49,24 @@
       <p class="muted tv-hint">Every channel in the file is added. Up to {{ max_mb }} MB.</p>
       <div class="tv-actions"><button type="submit">Upload</button></div>
     </form>
+  </section>
+
+  <section class="card">
+    <h2>Program guide</h2>
+    <p class="muted tv-hint">An XMLTV guide URL (.xml or .xml.gz). kn0ble.com/tv shows what's on now and next.
+      Channels match by the <code>tvg-id</code> in your playlist, or by name when there isn't one.</p>
+    <form method="post" action="{{ url_for('admin_tv_guide') }}" class="tv-form">
+      {% include "_csrf.html" %}
+      <label for="tv-epg">Guide URL</label>
+      <input id="tv-epg" type="url" name="epg_url" value="{{ epg_url }}" placeholder="https://.../epg.xml" autocomplete="off">
+      <div class="tv-actions">
+        <button type="submit">Save</button>
+        {% if epg_url %}<button type="submit" name="clear" value="1" class="secondary">Remove guide</button>{% endif %}
+      </div>
+    </form>
+    {% if epg_url %}
+      <p class="muted tv-hint"><a href="https://kn0ble.com/tv/live/guide.json" target="_blank" rel="noopener">Check the guide status</a> (for the default channel).</p>
+    {% endif %}
   </section>
 
   <section class="card">
@@ -69,22 +87,24 @@
       <form method="post" id="tv-act">
         {% include "_csrf.html" %}
         <input type="hidden" name="name" id="tv-rename-value">
+        <input type="hidden" name="epg_id" id="tv-epg-value">
       </form>
       <ul class="tv-list" id="tv-list">
         {% for c in channels %}
-          <li class="tv-row{% if active and c.id == active.id %} on{% endif %}" data-search="{{ (c.name ~ ' ' ~ c.group) | lower }}">
+          <li class="tv-row{% if active and c.id == active.id %} on{% endif %}" data-search="{{ (c.name ~ ' ' ~ c.group ~ ' ' ~ c.epg_id) | lower }}">
             <div class="tv-row-main">
               <span class="tv-row-name">{{ c.name }}</span>
-              {% if c.group %}<span class="muted tv-row-group">{{ c.group }}</span>{% endif %}
+              {% if c.group or c.epg_id %}<span class="muted tv-row-group">{{ c.group }}{% if c.group and c.epg_id %} &middot; {% endif %}{% if c.epg_id %}guide: {{ c.epg_id }}{% endif %}</span>{% endif %}
             </div>
             <div class="tv-row-actions">
               <button type="button" class="link-button tv-preview-btn" data-url="{{ c.url }}" data-name="{{ c.name }}">Preview</button>
               {% if active and c.id == active.id %}
-                <span class="tv-badge">On TV</span>
+                <span class="tv-badge">Default</span>
               {% else %}
-                <button type="submit" form="tv-act" class="link-button" formaction="{{ url_for('admin_tv_play', channel_id=c.id) }}">Put on TV</button>
+                <button type="submit" form="tv-act" class="link-button" formaction="{{ url_for('admin_tv_play', channel_id=c.id) }}">Make default</button>
               {% endif %}
               <button type="submit" form="tv-act" class="link-button tv-rename" data-name="{{ c.name }}" formaction="{{ url_for('admin_tv_rename', channel_id=c.id) }}">Rename</button>
+              <button type="submit" form="tv-act" class="link-button tv-guideid" data-id="{{ c.epg_id }}" formaction="{{ url_for('admin_tv_guide_id', channel_id=c.id) }}">Guide ID</button>
               <button type="submit" form="tv-act" class="link-button danger tv-remove" data-name="{{ c.name }}" formaction="{{ url_for('admin_tv_delete', channel_id=c.id) }}">Remove</button>
             </div>
           </li>
@@ -139,6 +159,13 @@
           var n = prompt("New name", b.dataset.name);
           if (n === null || !n.trim()) { e.preventDefault(); return; }
           document.getElementById("tv-rename-value").value = n.trim();
+        });
+      });
+      document.querySelectorAll(".tv-guideid").forEach(function (b) {
+        b.addEventListener("click", function (e) {
+          var v = prompt("Guide ID (the channel id in the guide file; blank = match by name)", b.dataset.id);
+          if (v === null) { e.preventDefault(); return; }
+          document.getElementById("tv-epg-value").value = v.trim();
         });
       });
       document.querySelectorAll(".tv-remove").forEach(function (b) {

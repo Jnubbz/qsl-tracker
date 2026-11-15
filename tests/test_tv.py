@@ -68,7 +68,7 @@ def test_add_and_put_on_tv(client):
     cfg = client.get("/tv-config.json").get_json()["channel"]
     assert cfg["name"] == "Two" and "url" not in cfg
     html = client.get("/admin/tv").get_data(as_text=True)
-    assert "On TV now: <strong>Two</strong>" in html
+    assert "Default channel: <strong>Two</strong>" in html
     assert "Channels <span class=\"muted\">(2)</span>" in html
 
 
@@ -158,3 +158,37 @@ def test_internal_config_needs_token(client, monkeypatch):
     assert resp.get_json()["channel"]["url"] == "http://h.example:8080/USER/PASS/123"
     assert resp.headers["Cache-Control"] == "no-store"
     assert "Set-Cookie" not in resp.headers
+
+
+def test_m3u_keeps_tvg_id():
+    chans = tv_channels.parse_m3u(M3U)
+    assert chans[0]["epg_id"] == "news.us"
+    assert chans[1]["epg_id"] == ""
+
+
+def test_guide_url_and_ids_reach_internal_config(client, monkeypatch):
+    monkeypatch.setenv("TV_PROXY_TOKEN", "s3cret")
+    sign_in_admin(client)
+    upload(client, M3U)
+    post(client, "/admin/tv/guide", epg_url="javascript:x")
+    assert tv_channels.load()["epg_url"] == ""
+    post(client, "/admin/tv/guide", epg_url="https://epg.example/epg.xml")
+    wx = tv_channels.load()["channels"][1]["id"]
+    post(client, f"/admin/tv/{wx}/guide-id", epg_id=" weather.us ")
+    cfg = client.get("/tv-config-internal.json", headers={"X-TV-Token": "s3cret"}).get_json()
+    assert cfg["epg_url"] == "https://epg.example/epg.xml"
+    assert cfg["channel"]["epg_id"] == "news.us"
+    assert {"epg_id": "weather.us", "name": "Weather 24/7"} in cfg["epg_channels"]
+    assert len(cfg["channels"]) == 3 and cfg["active"] == cfg["channels"][0]["id"]
+    assert cfg["channels"][0]["group"] == "News" and cfg["channels"][0]["logo"] == "https://img.example/n.png"
+    assert cfg["channels"][1]["url"] == "https://cdn.example/wx/playlist.m3u8"
+    # Guide URL survives replacing the list and clearing channels.
+    upload(client, M3U, replace="1")
+    post(client, "/admin/tv/clear")
+    assert tv_channels.load()["epg_url"] == "https://epg.example/epg.xml"
+    html = client.get("/admin/tv").get_data(as_text=True)
+    assert 'value="https://epg.example/epg.xml"' in html
+    post(client, "/admin/tv/guide", clear="1")
+    assert tv_channels.load()["epg_url"] == ""
+    # The public config never shows the guide id list or URLs.
+    assert "epg" not in client.get("/tv-config.json").get_data(as_text=True)

@@ -23,6 +23,7 @@ import db
 MAX_CHANNELS = 5000
 MAX_NAME = 120
 MAX_URL = 2048
+MAX_EPG_ID = 120
 
 _lock = threading.Lock()
 
@@ -39,16 +40,19 @@ def _path() -> Path:
 
 
 def load() -> dict:
-    """{"channels": [{"id", "name", "url", "group", "logo"}], "active": id|None}"""
+    """{"channels": [{"id", "name", "url", "group", "logo", "epg_id"}],
+    "active": id|None, "epg_url": str}"""
     try:
         data = json.loads(_path().read_text("utf-8"))
     except (FileNotFoundError, ValueError):
-        return {"channels": [], "active": None}
+        return {"channels": [], "active": None, "epg_url": ""}
     chans = [c for c in data.get("channels", []) if isinstance(c, dict) and c.get("id") and c.get("url")]
     active = data.get("active")
     if active not in {c["id"] for c in chans}:
         active = None
-    return {"channels": chans, "active": active}
+    for c in chans:
+        c.setdefault("epg_id", "")
+    return {"channels": chans, "active": active, "epg_url": data.get("epg_url") or ""}
 
 
 def _save(data: dict) -> None:
@@ -120,13 +124,14 @@ def parse_m3u(text: str) -> list[dict]:
                 "name": _clean_text(name or attrs.get("tvg-name", ""), MAX_NAME),
                 "group": _clean_text(attrs.get("group-title", ""), 60),
                 "logo": clean_url(attrs.get("tvg-logo", "")) or "",
+                "epg_id": _clean_text(attrs.get("tvg-id", ""), MAX_EPG_ID),
             }
             continue
         if line.startswith("#"):
             continue
         url = clean_url(line)
         if url:
-            ch = pending or {"name": "", "group": "", "logo": ""}
+            ch = pending or {"name": "", "group": "", "logo": "", "epg_id": ""}
             ch["url"] = url
             if not ch["name"]:
                 ch["name"] = urlparse(url).netloc
@@ -137,7 +142,7 @@ def parse_m3u(text: str) -> list[dict]:
 
 # --- changes -----------------------------------------------------------
 
-def add(name: str, url: str, group: str = "", logo: str = "") -> dict:
+def add(name: str, url: str, group: str = "", logo: str = "", epg_id: str = "") -> dict:
     url = clean_url(url)
     if not url:
         raise ValueError("that isn't an http(s) URL")
@@ -157,6 +162,7 @@ def add(name: str, url: str, group: str = "", logo: str = "") -> dict:
             "url": url,
             "group": _clean_text(group, 60),
             "logo": clean_url(logo) or "",
+            "epg_id": _clean_text(epg_id, MAX_EPG_ID),
         }
         data["channels"].append(ch)
         if data["active"] is None:
@@ -169,7 +175,9 @@ def add_many(channels: list[dict], replace: bool = False) -> tuple[int, int]:
     """Add parsed channels; skip URLs already present. Returns
     (added, skipped). With replace=True the old list is dropped first."""
     with _lock:
-        data = {"channels": [], "active": None} if replace else load()
+        data = load()
+        if replace:
+            data["channels"], data["active"] = [], None
         seen = {c["url"] for c in data["channels"]}
         added = skipped = 0
         for ch in channels:
@@ -177,7 +185,7 @@ def add_many(channels: list[dict], replace: bool = False) -> tuple[int, int]:
                 skipped += 1
                 continue
             seen.add(ch["url"])
-            data["channels"].append({"id": _new_id(), **{k: ch.get(k, "") for k in ("name", "url", "group", "logo")}})
+            data["channels"].append({"id": _new_id(), **{k: ch.get(k, "") for k in ("name", "url", "group", "logo", "epg_id")}})
             added += 1
         if data["active"] is None and data["channels"]:
             data["active"] = data["channels"][0]["id"]
@@ -223,8 +231,33 @@ def delete(channel_id: str) -> bool:
 
 
 def clear() -> None:
+    """Remove every channel (the guide URL stays)."""
     with _lock:
-        _save({"channels": [], "active": None})
+        data = load()
+        data["channels"], data["active"] = [], None
+        _save(data)
+
+
+def set_epg_id(channel_id: str, epg_id: str) -> bool:
+    with _lock:
+        data = load()
+        for c in data["channels"]:
+            if c["id"] == channel_id:
+                c["epg_id"] = _clean_text(epg_id, MAX_EPG_ID)
+                _save(data)
+                return True
+        return False
+
+
+def set_epg_url(url: str) -> None:
+    """Set (or with "" clear) the XMLTV guide URL. Raises ValueError."""
+    url = (url or "").strip()
+    if url and not clean_url(url):
+        raise ValueError("that isn't an http(s) URL")
+    with _lock:
+        data = load()
+        data["epg_url"] = url
+        _save(data)
 
 
 def active_channel() -> dict | None:
@@ -243,8 +276,20 @@ def public_config() -> dict:
 
 
 def internal_config() -> dict:
-    """For the kn0ble-tv relay only (token-checked): includes the URL."""
-    ch = active_channel()
-    if not ch:
-        return {"channel": None}
-    return {"channel": {"id": ch["id"], "name": ch["name"], "url": ch["url"]}}
+    """For the kn0ble-tv relay only (token-checked): the stream URL, the
+    guide URL, and every channel's guide id/name so the relay keeps
+    guide data for just these channels."""
+    data = load()
+    ch = next((c for c in data["channels"] if c["id"] == data["active"]), None)
+    return {
+        "channel": {"id": ch["id"], "name": ch["name"], "url": ch["url"], "epg_id": ch["epg_id"]} if ch else None,
+        "epg_url": data["epg_url"],
+        "epg_channels": [{"epg_id": c["epg_id"], "name": c["name"]} for c in data["channels"]],
+        # The whole list, for the channel menu on kn0ble.com/tv. The relay
+        # passes on names/groups/logos only; URLs never leave it.
+        "active": data["active"],
+        "channels": [
+            {k: c.get(k, "") for k in ("id", "name", "url", "group", "logo", "epg_id")}
+            for c in data["channels"]
+        ],
+    }

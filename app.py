@@ -899,6 +899,7 @@ def admin_tv():
     active = next((c for c in data["channels"] if c["id"] == data["active"]), None)
     return render_template(
         "admin_tv.html",
+        epg_url=data["epg_url"],
         channels=data["channels"],
         active=active,
         max_mb=MAX_UPLOAD_BYTES // (1024 * 1024),
@@ -917,7 +918,7 @@ def admin_tv_add():
         return redirect(url_for("admin_tv"))
     if request.form.get("play") == "1":
         tv_channels.set_active(ch["id"])
-        flash(f"{ch['name']} is on TV now.", "success")
+        flash(f"{ch['name']} is the default channel now.", "success")
     else:
         flash(f"Added {ch['name']}.", "success")
     return redirect(url_for("admin_tv"))
@@ -963,7 +964,7 @@ def admin_tv_play(channel_id):
     ch = tv_channels.set_active(channel_id)
     if not ch:
         abort(404)
-    flash(f"{ch['name']} is on TV now.", "success")
+    flash(f"{ch['name']} is the default channel now.", "success")
     return redirect(url_for("admin_tv"))
 
 
@@ -972,6 +973,28 @@ def admin_tv_play(channel_id):
 def admin_tv_rename(channel_id):
     if not tv_channels.rename(channel_id, request.form.get("name", "")):
         flash("Couldn't rename that channel.", "error")
+    return redirect(url_for("admin_tv"))
+
+
+@app.route("/admin/tv/<channel_id>/guide-id", methods=["POST"])
+@admin_required
+def admin_tv_guide_id(channel_id):
+    if not tv_channels.set_epg_id(channel_id, request.form.get("epg_id", "")):
+        abort(404)
+    flash("Guide ID saved.", "success")
+    return redirect(url_for("admin_tv"))
+
+
+@app.route("/admin/tv/guide", methods=["POST"])
+@admin_required
+def admin_tv_guide():
+    url = "" if request.form.get("clear") == "1" else request.form.get("epg_url", "")
+    try:
+        tv_channels.set_epg_url(url)
+    except ValueError as exc:
+        flash(f"Couldn't save that: {exc}.", "error")
+        return redirect(url_for("admin_tv"))
+    flash("Guide URL saved. kn0ble.com/tv loads it on the next visit." if url else "Guide removed.", "success")
     return redirect(url_for("admin_tv"))
 
 
