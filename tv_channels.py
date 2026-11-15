@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 
 import db
 
-MAX_CHANNELS = 5000
+MAX_CHANNELS = 100_000
 MAX_NAME = 120
 MAX_URL = 2048
 MAX_EPG_ID = 120
@@ -53,6 +53,32 @@ def load() -> dict:
     for c in chans:
         c.setdefault("epg_id", "")
     return {"channels": chans, "active": active, "epg_url": data.get("epg_url") or ""}
+
+
+_cache: dict = {"key": None, "data": None}
+
+
+def _stat_key():
+    try:
+        st = _path().stat()
+    except FileNotFoundError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
+def version() -> str:
+    """An ETag for the stored list; changes whenever it's saved."""
+    key = _stat_key()
+    return '"%d-%d"' % key if key else '"empty"'
+
+
+def load_cached() -> dict:
+    """load(), reused until the file changes. READ-ONLY: callers must not
+    modify what this returns (big lists take a while to parse)."""
+    key = _stat_key()
+    if key is None or _cache["key"] != key:
+        _cache["data"], _cache["key"] = load(), key
+    return _cache["data"]
 
 
 def _save(data: dict) -> None:
@@ -171,26 +197,45 @@ def add(name: str, url: str, group: str = "", logo: str = "", epg_id: str = "") 
         return ch
 
 
-def add_many(channels: list[dict], replace: bool = False) -> tuple[int, int]:
-    """Add parsed channels; skip URLs already present. Returns
-    (added, skipped). With replace=True the old list is dropped first."""
+# Movie/series entries (files, not live channels). Same rule as the relay's
+# channel menu. Used to keep live channels first when a list is too big.
+_VOD_URL = re.compile(r"/(movie|movies|series|vod)/|\.(mp4|mkv|avi|mov|m4v|wmv|flv)(\?|$)", re.I)
+_VOD_GROUP = re.compile(r"\b(vod|movies?|films?|series|tv shows?)\b", re.I)
+
+
+def is_vod(ch: dict) -> bool:
+    return bool(_VOD_URL.search(ch.get("url") or "") or _VOD_GROUP.search(ch.get("group") or ""))
+
+
+def add_many(channels: list[dict], replace: bool = False) -> tuple[int, int, int]:
+    """Add parsed channels. Returns (added, duplicates, over_limit).
+    URLs already present are duplicates. If the list won't all fit under
+    MAX_CHANNELS, live channels go in before movies/series. With
+    replace=True the old list is dropped first."""
     with _lock:
         data = load()
         if replace:
             data["channels"], data["active"] = [], None
         seen = {c["url"] for c in data["channels"]}
-        added = skipped = 0
+        fresh, dupes = [], 0
         for ch in channels:
-            if ch["url"] in seen or len(data["channels"]) >= MAX_CHANNELS:
-                skipped += 1
+            if ch["url"] in seen:
+                dupes += 1
                 continue
             seen.add(ch["url"])
+            fresh.append(ch)
+        room = MAX_CHANNELS - len(data["channels"])
+        if len(fresh) > room:
+            fresh = [c for c in fresh if not is_vod(c)] + [c for c in fresh if is_vod(c)]
+        over = max(0, len(fresh) - max(room, 0))
+        fresh = fresh[:max(room, 0)]
+        for ch in fresh:
             data["channels"].append({"id": _new_id(), **{k: ch.get(k, "") for k in ("name", "url", "group", "logo", "epg_id")}})
-            added += 1
         if data["active"] is None and data["channels"]:
-            data["active"] = data["channels"][0]["id"]
+            live = next((c for c in data["channels"] if not is_vod(c)), data["channels"][0])
+            data["active"] = live["id"]
         _save(data)
-        return added, skipped
+        return len(fresh), dupes, over
 
 
 def set_active(channel_id: str) -> dict | None:
@@ -261,7 +306,7 @@ def set_epg_url(url: str) -> None:
 
 
 def active_channel() -> dict | None:
-    data = load()
+    data = load_cached()
     return next((c for c in data["channels"] if c["id"] == data["active"]), None)
 
 
@@ -279,7 +324,7 @@ def internal_config() -> dict:
     """For the kn0ble-tv relay only (token-checked): the stream URL, the
     guide URL, and every channel's guide id/name so the relay keeps
     guide data for just these channels."""
-    data = load()
+    data = load_cached()
     ch = next((c for c in data["channels"] if c["id"] == data["active"]), None)
     return {
         "channel": {"id": ch["id"], "name": ch["name"], "url": ch["url"], "epg_id": ch["epg_id"]} if ch else None,

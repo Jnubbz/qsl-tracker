@@ -457,6 +457,7 @@ table.contacts tr.direct { background: rgba(47, 157, 111, 0.12); }
 
 .flash-success { background: rgba(47, 157, 111, 0.18); color: #6fd3a8; }
 .flash-error { background: rgba(229, 83, 75, 0.18); color: #ff8a82; }
+.flash-warning { background: rgba(255, 184, 107, 0.16); color: #ffc98f; }
 
 .site-footer {
   text-align: center;
@@ -848,3 +849,6 @@ button.secondary { background: transparent; color: var(--ink); border: 1px solid
 .tv-row-group { font-size: 0.8rem; }
 .tv-row-actions { display: flex; gap: 0.9rem; align-items: center; flex-wrap: wrap; }
 .tv-badge { font-size: 0.8rem; padding: 0.1rem 0.5rem; border-radius: 999px; background: var(--accent); color: #fff; }
+.tv-search { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin: 0.75rem 0 0.25rem; }
+.tv-search .tv-filter { flex: 1 1 12rem; margin: 0; }
+.tv-search button { align-self: auto; }

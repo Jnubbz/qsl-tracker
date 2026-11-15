@@ -71,9 +71,12 @@ def _env_flag(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-# 8 MB covers an ADIF log and a few card scans. Leave this unset and a
+# 95 MB: big IPTV playlists (with movie lists) run to tens of MB.
+# Cloudflare's Free plan rejects request bodies over 100 MB before they
+# reach us, so staying just under it means visitors get our clear "too
+# large" message instead of Cloudflare's bare 413. Leave this unset and a
 # visitor can post a body large enough to fill the worker's memory.
-MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+MAX_UPLOAD_BYTES = 95 * 1024 * 1024
 
 app.config.update(
     MAX_CONTENT_LENGTH=MAX_UPLOAD_BYTES,
@@ -892,15 +895,28 @@ def oot_audio_file(name):
 # page only plays. Stored by tv_channels on the data volume.
 # ---------------------------------------------------------------------
 
+TV_ADMIN_ROWS = 500
+
+
 @app.route("/admin/tv")
 @admin_required
 def admin_tv():
-    data = tv_channels.load()
+    data = tv_channels.load_cached()
     active = next((c for c in data["channels"] if c["id"] == data["active"]), None)
+    # Big playlists can hold tens of thousands of entries: filter here and
+    # draw at most TV_ADMIN_ROWS of them.
+    q = request.args.get("q", "").strip()
+    rows = data["channels"]
+    if q:
+        ql = q.lower()
+        rows = [c for c in rows if ql in c["name"].lower() or ql in c["group"].lower() or ql in c["epg_id"].lower()]
     return render_template(
         "admin_tv.html",
         epg_url=data["epg_url"],
-        channels=data["channels"],
+        channels=rows[:TV_ADMIN_ROWS],
+        total=len(data["channels"]),
+        matches=len(rows),
+        q=q,
         active=active,
         max_mb=MAX_UPLOAD_BYTES // (1024 * 1024),
     )
@@ -950,11 +966,14 @@ def admin_tv_upload():
     if not channels:
         flash("No channels found in that file.", "error")
         return redirect(url_for("admin_tv"))
-    added, skipped = tv_channels.add_many(channels, replace=request.form.get("replace") == "1")
-    msg = f"Added {added} channel{'s' if added != 1 else ''}"
-    if skipped:
-        msg += f" ({skipped} already here or over the limit)"
-    flash(msg + ".", "success")
+    added, dupes, over = tv_channels.add_many(channels, replace=request.form.get("replace") == "1")
+    msg = f"Added {added:,} channel{'s' if added != 1 else ''}."
+    if dupes:
+        msg += f" {dupes:,} were already in the list."
+    if over:
+        msg += (f" {over:,} didn't fit: the limit is {tv_channels.MAX_CHANNELS:,}, and live"
+                " channels were kept first, so it's movies/series that were left out.")
+    flash(msg, "warning" if over else "success")
     return redirect(url_for("admin_tv"))
 
 
@@ -1023,7 +1042,14 @@ def tv_config_internal():
     sent = request.headers.get("X-TV-Token", "")
     if not expected or not secrets.compare_digest(expected.encode(), sent.encode()):
         abort(404)
-    resp = jsonify(tv_channels.internal_config())
+    # The relay asks every few seconds while someone watches. With a big
+    # list, answer "unchanged" (304) without reading or sending it.
+    etag = tv_channels.version()
+    if request.headers.get("If-None-Match") == etag:
+        resp = app.response_class(status=304)
+    else:
+        resp = jsonify(tv_channels.internal_config())
+    resp.headers["ETag"] = etag
     resp.headers["Cache-Control"] = "no-store"
     return resp
 

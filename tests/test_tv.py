@@ -192,3 +192,63 @@ def test_guide_url_and_ids_reach_internal_config(client, monkeypatch):
     assert tv_channels.load()["epg_url"] == ""
     # The public config never shows the guide id list or URLs.
     assert "epg" not in client.get("/tv-config.json").get_data(as_text=True)
+
+
+def test_upload_limit_is_95_mb(client):
+    import app as app_module
+    assert app_module.MAX_UPLOAD_BYTES == 95 * 1024 * 1024
+    assert app_module.app.config["MAX_CONTENT_LENGTH"] == 95 * 1024 * 1024
+
+
+def test_big_playlist_search_and_row_cap(client):
+    sign_in_admin(client)
+    lines = ["#EXTM3U"]
+    for i in range(1200):
+        grp = "Movies" if i % 2 else "Live"
+        lines += [f'#EXTINF:-1 tvg-id="c{i}.x" group-title="{grp}",Channel {i:04d}', f"https://s.example/{i}.m3u8"]
+    upload(client, "\n".join(lines) + "\n")
+    assert len(tv_channels.load()["channels"]) == 1200
+    html = client.get("/admin/tv").get_data(as_text=True)
+    assert "Channels <span class=\"muted\">(1200)</span>" in html
+    assert html.count('<li class="tv-row') == 500
+    assert "Showing the first 500 of 1200" in html
+    html = client.get("/admin/tv?q=channel 0042").get_data(as_text=True)
+    assert html.count('<li class="tv-row') == 1 and "1 match." in html
+    html = client.get("/admin/tv?q=zzz").get_data(as_text=True)
+    assert "No channels match." in html and 'name="q"' in html
+
+
+def test_internal_config_etag(client, monkeypatch):
+    monkeypatch.setenv("TV_PROXY_TOKEN", "s3cret")
+    sign_in_admin(client)
+    upload(client, M3U)
+    h = {"X-TV-Token": "s3cret"}
+    first = client.get("/tv-config-internal.json", headers=h)
+    etag = first.headers["ETag"]
+    again = client.get("/tv-config-internal.json", headers={**h, "If-None-Match": etag})
+    assert again.status_code == 304 and again.get_data() == b""
+    import time; time.sleep(0.01)
+    post(client, "/admin/tv/guide", epg_url="https://epg.example/x.xml")
+    changed = client.get("/tv-config-internal.json", headers={**h, "If-None-Match": etag})
+    assert changed.status_code == 200 and changed.get_json()["epg_url"] == "https://epg.example/x.xml"
+    # Wrong token still 404, even with a matching ETag.
+    assert client.get("/tv-config-internal.json", headers={"X-TV-Token": "no", "If-None-Match": etag}).status_code == 404
+
+
+def test_over_limit_keeps_live_first(client, monkeypatch):
+    monkeypatch.setattr(tv_channels, "MAX_CHANNELS", 5)
+    sign_in_admin(client)
+    lines = ["#EXTM3U"]
+    for i in range(4):
+        lines += [f'#EXTINF:-1 group-title="Movies",Film {i}', f"http://p.example/movie/U/P/{i}.mkv"]
+    for i in range(4):
+        lines += [f'#EXTINF:-1 group-title="News",Live {i}', f"http://p.example/U/P/{i}"]
+    upload(client, "\n".join(lines) + "\n")
+    names = [c["name"] for c in tv_channels.load()["channels"]]
+    assert names == ["Live 0", "Live 1", "Live 2", "Live 3", "Film 0"]
+    assert tv_channels.active_channel()["name"] == "Live 0"
+    html = client.get("/admin/tv").get_data(as_text=True)
+    assert "Added 5 channels." in html and "3 didn&#39;t fit" in html
+    upload(client, "\n".join(lines) + "\n")
+    html = client.get("/admin/tv").get_data(as_text=True)
+    assert "Added 0 channels. 5 were already in the list. 3 didn&#39;t fit" in html

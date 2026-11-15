@@ -71,17 +71,26 @@
 
   <section class="card">
     <div class="tv-head">
-      <h2>Channels <span class="muted">({{ channels | length }})</span></h2>
-      {% if channels %}
-        <form method="post" action="{{ url_for('admin_tv_clear') }}" onsubmit="return confirm('Remove all {{ channels | length }} channels?')">
+      <h2>Channels <span class="muted">({{ total }})</span></h2>
+      {% if total %}
+        <form method="post" action="{{ url_for('admin_tv_clear') }}" onsubmit="return confirm('Remove all {{ total }} channels?')">
           {% include "_csrf.html" %}
           <button type="submit" class="link-button danger">Remove all</button>
         </form>
       {% endif %}
     </div>
-    {% if channels %}
-      {% if channels | length > 8 %}
-        <input type="search" id="tv-filter" class="tv-filter" placeholder="Filter channels" aria-label="Filter channels">
+    {% if total %}
+      {% if total > 8 %}
+        <form method="get" action="{{ url_for('admin_tv') }}" class="tv-search">
+          <input type="search" name="q" value="{{ q }}" class="tv-filter" placeholder="Search {{ total }} channels" aria-label="Search channels">
+          <button type="submit" class="secondary">Search</button>
+          {% if q %}<a href="{{ url_for('admin_tv') }}">Clear</a>{% endif %}
+        </form>
+      {% endif %}
+      {% if matches > channels | length %}
+        <p class="muted tv-hint">Showing the first {{ channels | length }} of {{ matches }}{% if q %} matches{% endif %}. Search to find others.</p>
+      {% elif q %}
+        <p class="muted tv-hint">{{ matches }} match{{ '' if matches == 1 else 'es' }}.</p>
       {% endif %}
       {# One shared form; each button posts to its own action. Keeps a big list light. #}
       <form method="post" id="tv-act">
@@ -110,7 +119,7 @@
           </li>
         {% endfor %}
       </ul>
-      <p class="muted" id="tv-filter-empty" hidden>No channels match.</p>
+      {% if not channels %}<p class="muted">No channels match.</p>{% endif %}
     {% else %}
       <p class="muted">No channels yet.</p>
     {% endif %}
