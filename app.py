@@ -25,6 +25,7 @@ import db
 import labels
 import oot_songs
 import tv_channels
+import tv_fetch
 import photomap_store
 import qso_map
 from adif import distinct_callsigns, parse_adif
@@ -919,7 +920,34 @@ def admin_tv():
         q=q,
         active=active,
         max_mb=MAX_UPLOAD_BYTES // (1024 * 1024),
+        link=tv_fetch.status(),
     )
+
+
+@app.route("/admin/tv/link", methods=["POST"])
+@admin_required
+def admin_tv_link():
+    """Load (or with refresh=1, re-load) the channel list from a link."""
+    replace = request.form.get("replace") == "1"
+    try:
+        if request.form.get("forget") == "1":
+            tv_fetch.forget()
+            flash("Playlist link removed. The channels stay.", "success")
+        elif tv_fetch.start(None if request.form.get("refresh") == "1" else request.form.get("url", ""), replace=replace):
+            flash("Loading the playlist on the server. This page updates when it's done.", "success")
+        else:
+            flash("A playlist is already loading.", "error")
+    except ValueError as exc:
+        flash(f"Couldn't start: {exc}.", "error")
+    return redirect(url_for("admin_tv"))
+
+
+@app.route("/admin/tv/link/status.json")
+@admin_required
+def admin_tv_link_status():
+    resp = jsonify(tv_fetch.status())
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @app.route("/admin/tv/add", methods=["POST"])

@@ -39,6 +39,34 @@
     </form>
   </section>
 
+  <section class="card" id="tv-link">
+    <h2>Load from a playlist link</h2>
+    <p class="muted tv-hint">Best for big lists: your server downloads it straight from the provider, so nothing has to go up over your connection. Usually a link like <code>http://host:port/get.php?username=…&amp;password=…&amp;type=m3u_plus</code>.</p>
+    {% if link.running %}
+      <p class="tv-on" id="tv-link-progress" data-running="1">Loading&hellip; <span id="tv-link-bytes">{{ (link.bytes / 1048576) | round(1) }} MB</span> <span class="muted" id="tv-link-phase">({{ link.phase }})</span></p>
+    {% elif link.last %}
+      <p class="{{ 'flash flash-success' if link.last.ok else 'flash flash-error' }} tv-link-last">{{ link.last.message }} <span class="muted" data-ts="{{ link.last.at }}"></span></p>
+    {% endif %}
+    {% if link.has_url %}
+      <p class="muted tv-url">Saved link: {{ link.url_masked }}</p>
+      <form method="post" action="{{ url_for('admin_tv_link') }}" class="tv-actions">
+        {% include "_csrf.html" %}
+        <input type="hidden" name="refresh" value="1">
+        <input type="hidden" name="replace" value="1">
+        <button type="submit"{% if link.running %} disabled{% endif %}>Refresh from link</button>
+        <button type="submit" name="forget" value="1" class="secondary">Forget link</button>
+      </form>
+      <p class="muted tv-hint">Refresh replaces the list with what the link has now.</p>
+    {% endif %}
+    <form method="post" action="{{ url_for('admin_tv_link') }}" class="tv-form">
+      {% include "_csrf.html" %}
+      <label for="tv-link-url">{{ 'New playlist link' if link.has_url else 'Playlist link' }}</label>
+      <input id="tv-link-url" type="url" name="url" required autocomplete="off" placeholder="http://…/get.php?…">
+      <label class="tv-check"><input type="checkbox" name="replace" value="1" checked> Replace the current list</label>
+      <div class="tv-actions"><button type="submit"{% if link.running %} disabled{% endif %}>Load</button></div>
+    </form>
+  </section>
+
   <section class="card">
     <h2>Upload a playlist</h2>
     <form method="post" enctype="multipart/form-data" action="{{ url_for('admin_tv_upload') }}" class="tv-form">
@@ -46,7 +74,7 @@
       <label for="tv-file">IPTV channel list (.m3u, .m3u8, or similar)</label>
       <input id="tv-file" type="file" name="playlist" required>
       <label class="tv-check"><input type="checkbox" name="replace" value="1"> Replace the current list</label>
-      <p class="muted tv-hint">Every channel in the file is added. Up to {{ max_mb }} MB.</p>
+      <p class="muted tv-hint">Every channel in the file is added. Up to {{ max_mb }} MB, but on a slow upload connection anything over ~20 MB can time out; use a playlist link for those.</p>
       <div class="tv-actions"><button type="submit">Upload</button></div>
     </form>
   </section>
@@ -126,6 +154,28 @@
   </section>
 
   <script src="{{ url_for('static', filename='tv/hls.min.js') }}"></script>
+  <script>
+    // Playlist link: show progress while the server loads it, then reload.
+    (function () {
+      document.querySelectorAll("[data-ts]").forEach(function (el) {
+        var t = +el.dataset.ts; if (t) el.textContent = "(" + new Date(t * 1000).toLocaleString() + ")";
+      });
+      var prog = document.getElementById("tv-link-progress");
+      if (!prog) return;
+      var url = "{{ url_for('admin_tv_link_status') }}";
+      (function poll() {
+        fetch(url, { cache: "no-store", credentials: "same-origin" })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (!d.running) { location.reload(); return; }
+            document.getElementById("tv-link-bytes").textContent = (d.bytes / 1048576).toFixed(1) + " MB";
+            document.getElementById("tv-link-phase").textContent = "(" + d.phase + ")";
+            setTimeout(poll, 1500);
+          })
+          .catch(function () { setTimeout(poll, 3000); });
+      })();
+    })();
+  </script>
   <script>
     (function () {
       var video = document.getElementById("tv-preview");
