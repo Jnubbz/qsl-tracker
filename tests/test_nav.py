@@ -4,6 +4,8 @@ import pytest
 
 Sync, login, and password checks are intentionally not exercised here.
 """
+from html.parser import HTMLParser
+
 import photomap_store
 
 import app as app_module
@@ -22,6 +24,73 @@ ADMIN_LINKS = (
     "QSL Photo Map",
     "Request a Card",
 )
+
+
+class _ButtonForms(HTMLParser):
+    """Pair each submit button with the form that would receive it."""
+
+    def __init__(self):
+        super().__init__()
+        self.by_id = {}
+        self.buttons = []
+        self._stack = []
+        self._capture = None
+        self._buf = []
+
+    def handle_starttag(self, tag, attrs):
+        attr = dict(attrs)
+        if tag == "form":
+            form = {
+                "action": attr.get("action") or "",
+                "method": (attr.get("method") or "get").lower(),
+                "id": attr.get("id") or "",
+            }
+            if form["id"]:
+                self.by_id[form["id"]] = form
+            self._stack.append(form)
+        elif tag == "button":
+            self._capture = {
+                "type": (attr.get("type") or "submit").lower(),
+                "form_id": attr.get("form") or "",
+                "form": self._stack[-1] if self._stack else None,
+                "hook": bool(
+                    attr.get("id") or attr.get("class") or attr.get("data-key") or attr.get("data-src")
+                ),
+            }
+            self._buf = []
+
+    def handle_endtag(self, tag):
+        if tag == "form" and self._stack:
+            self._stack.pop()
+        elif tag == "button" and self._capture is not None:
+            self._capture["label"] = " ".join("".join(self._buf).split())
+            self.buttons.append(self._capture)
+            self._capture = None
+
+    def handle_data(self, data):
+        if self._capture is not None:
+            self._buf.append(data)
+
+
+def _assert_submit_buttons_post(html: str):
+    """Every submit control posts (or gets) a real form. A button with no
+    form, and a type=button with nothing for script to bind, does nothing."""
+    parser = _ButtonForms()
+    parser.feed(html)
+    assert parser.buttons, "page has no buttons"
+    for button in parser.buttons:
+        if button["type"] == "button":
+            assert button["hook"], f"button {button['label']!r} has no script hook"
+            continue
+        assert button["type"] == "submit", button
+        form = button["form"]
+        if button["form_id"]:
+            form = parser.by_id.get(button["form_id"])
+            assert form is not None, f"{button['label']!r} names a missing form"
+        assert form is not None, f"{button['label']!r} is not in a form"
+        assert form["action"], f"{button['label']!r} form has no action"
+        if form["method"] == "post":
+            assert "csrf_token" in html
 
 
 def test_public_nav_and_address_labels_name(client):
@@ -155,32 +224,46 @@ def test_logbook_sections_and_not_matched_link(client, monkeypatch):
     sync_html = sync.get_data(as_text=True)
     assert "<h1>Logbook</h1>" in sync_html
     assert 'id="log-panel-sync"' in sync_html
-    assert 'id="log-panel-missing"' not in sync_html
-    assert 'id="log-panel-import"' not in sync_html
+    assert 'id="log-panel-missing"' in sync_html
+    assert 'id="log-panel-import"' in sync_html
     assert 'id="log-not-matched"' in sync_html
-    assert 'href="/admin/log?section=missing"' in sync_html
+    assert 'href="/admin/log?section=missing#log-panel-missing"' in sync_html
     assert "not matched" in sync_html
     assert "Your log" not in sync_html
-    # Exactly one Sync button on the page, and it posts to the sync route.
+    assert "section-tabs" not in sync_html
+    # One of each action. Sync posts; the tab that used the same label is gone.
     assert sync_html.count(">Sync from QRZ</button>") == 1
+    assert sync_html.count(">Sync from QRZ</a>") == 0
+    assert sync_html.count(">Find missing QSOs</button>") == 1
+    assert sync_html.count(">Find missing QSOs</a>") == 0
+    assert sync_html.count(">Import</button>") == 1
+    assert sync_html.count(">Re-sync everything from the start</button>") == 1
+    assert 'name="full" value="1"' in sync_html
     assert 'action="/admin/log/sync"' in sync_html
+    assert 'action="/admin/log/missing"' in sync_html
+    assert 'name="adif_file"' in sync_html
     assert 'href="/admin/log?section=sync"' not in sync_html
+    _assert_submit_buttons_post(sync_html)
 
     missing = client.get("/admin/log?section=missing")
     missing_html = missing.get_data(as_text=True)
     assert 'id="log-panel-missing"' in missing_html
+    assert 'class="card is-target"' in missing_html
     assert ">Find missing QSOs</button>" in missing_html
-    assert 'name="adif_file"' not in missing_html
+    assert 'name="adif_file"' in missing_html
+    assert missing_html.count(">Sync from QRZ</button>") == 1
+    assert missing_html.count(">Find missing QSOs</button>") == 1
+    _assert_submit_buttons_post(missing_html)
 
     imported = client.get("/admin/log?section=import")
     import_html = imported.get_data(as_text=True)
     assert 'id="log-panel-import"' in import_html
     assert "<h2>Import ADIF</h2>" in import_html
     assert 'name="adif_file"' in import_html
-    assert ">Find missing QSOs</button>" not in import_html
-    # Sync stays one press away from the other panels too.
+    assert import_html.count(">Find missing QSOs</button>") == 1
     assert import_html.count(">Sync from QRZ</button>") == 1
-    assert missing_html.count(">Sync from QRZ</button>") == 1
+    assert import_html.count(">Import</button>") == 1
+    _assert_submit_buttons_post(import_html)
 
     bogus = client.get("/admin/log?section=nope")
     assert 'id="log-panel-sync"' in bogus.get_data(as_text=True)
@@ -229,6 +312,11 @@ def test_qso_labels_naming(client, monkeypatch):
     assert "Pick from the map" not in html
     assert "Logbook" in html
     assert "Log out (admin)" not in html
+    # The label page keeps its own sync, and that one posts back here.
+    assert html.count(">Sync from QRZ</button>") == 1
+    assert 'action="/admin/log/sync"' in html
+    assert 'name="next"' in html
+    _assert_submit_buttons_post(html)
 
 
 def test_qsl_cards_pages(client, monkeypatch):
@@ -257,7 +345,10 @@ def test_qsl_cards_pages(client, monkeypatch):
     assert manage.status_code == 200
     assert "<h1>QSL Cards</h1>" in manage_html
     assert "Your log" not in manage_html
-    assert 'href="/admin/photomap/upload"' in manage_html
+    assert manage_html.count('href="/admin/photomap/upload"') == 1
+    assert ">Upload a card</a>" in manage_html
+    assert "section-tabs" not in manage_html
+    assert ">All cards</a>" not in manage_html
 
     upload = client.get("/admin/photomap/upload")
     upload_html = upload.get_data(as_text=True)
@@ -265,6 +356,11 @@ def test_qsl_cards_pages(client, monkeypatch):
     assert 'name="qso_date"' in upload_html
     assert 'name="rst_rcvd"' in upload_html
     assert "Open the Logbook" in upload_html
+    assert "section-tabs" not in upload_html
+    assert ">Upload</a>" not in upload_html
+    assert 'aria-label="Breadcrumb"' in upload_html
+    assert ">Save card</button>" in upload_html
+    _assert_submit_buttons_post(upload_html)
 
     edit = client.get("/admin/photomap/edit/3")
     edit_html = edit.get_data(as_text=True)
@@ -273,6 +369,10 @@ def test_qsl_cards_pages(client, monkeypatch):
     assert 'value="20260101"' in edit_html
     assert 'value="Field Day"' in edit_html
     assert 'aria-label="Breadcrumb"' in edit_html
+    assert "section-tabs" not in edit_html
+    assert ">All cards</a>" not in edit_html
+    assert ">Save changes</button>" in edit_html
+    _assert_submit_buttons_post(edit_html)
 
 
 def test_logout_routes_unchanged(client):

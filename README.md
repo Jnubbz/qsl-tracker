@@ -30,11 +30,12 @@ Log out of QRZ and log out of admin are separate, in the header.
 - **Request a Card** -- someone worked KN0BLE and wants a card mailed
   back. No QRZ login. Details under "Email notifications" below.
 - **Logbook** -- the copy of your log behind QSO Labels and QSL Cards
-  auto-fill. One page, three tasks: **Sync from QRZ**, **Find missing
-  QSOs**, and **Import ADIF**. Counts (this log, QRZ's total, last sync,
-  anything not matched) stay at the top. "Not matched" links straight
-  to Find missing QSOs. Filled by the QRZ Logbook API or an ADIF upload.
-  The old import URL `/admin/photomap/import-adif` opens Import ADIF.
+  auto-fill. One page: counts at the top, then one **Sync from QRZ**
+  button (and **Re-sync everything** once a sync has run), **Find missing
+  QSOs**, and **Import ADIF**. "Not matched" jumps to Find missing QSOs.
+  Filled by the QRZ Logbook API or an ADIF upload.
+  The old import URL `/admin/photomap/import-adif` opens the same page
+  with Import ADIF marked.
 - **QSO Labels** -- your own logged QSOs, filterable by callsign or
   DXCC entity, printed onto Avery 5163 labels to stick on the card, or
   printed **straight onto the 6"x4" QSL card** ("Print on the card"):
@@ -54,8 +55,8 @@ Log out of QRZ and log out of admin are separate, in the header.
   `tools/build_qso_map.py` (run by hand only to refresh them; the app
   never fetches anything).
 - **QSL Cards** -- admin upload and edit of scanned cards shown on the
-  QSL Photo Map. All cards and Upload are the two sections;
-  `/admin/photomap/upload` is Upload.
+  QSL Photo Map. The list has one **Upload a card** link;
+  `/admin/photomap/upload` is that form, with a breadcrumb back.
 
 ## How it works
 
